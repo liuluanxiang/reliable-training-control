@@ -1,5 +1,6 @@
 {
-  "experiment_name": "cifar100_resnet18",
+  "experiment_name": "main_cifar100_resnet18",
+  "experiment_type": "main",
   "dataset": "cifar100",
   "model": "resnet18",
   "methods": [
@@ -11,7 +12,9 @@
   "seeds": [
     1,
     2,
-    3
+    3,
+    4,
+    5
   ],
   "epochs": 120,
   "batch_size": 128,

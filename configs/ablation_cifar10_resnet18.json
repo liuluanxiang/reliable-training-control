@@ -1,18 +1,23 @@
 {
-  "experiment_name": "quick_cifar10_resnet18",
-  "experiment_type": "quick",
+  "experiment_name": "ablation_cifar10_resnet18",
+  "experiment_type": "ablation",
   "dataset": "cifar10",
   "model": "resnet18",
   "methods": [
-    "cosine",
-    "reliability"
+    "reliability",
+    "reliability_pb_only",
+    "reliability_pd_only",
+    "reliability_no_smoothing",
+    "reliability_val_loss_only"
   ],
   "seeds": [
-    1
+    1,
+    2,
+    3
   ],
-  "epochs": 3,
+  "epochs": 90,
   "batch_size": 128,
-  "num_workers": 2,
+  "num_workers": 8,
   "optimizer": "sgd",
   "lr": 0.1,
   "momentum": 0.9,

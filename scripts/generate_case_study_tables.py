@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.metrics import spearman_np, pearson_np, area_under_curve, slope_last, mean_std_text
+from src.results_io import collect_histories as load_histories, collect_summaries as load_summaries
 
 
 def collect_histories(results_dir):
@@ -46,6 +47,9 @@ def collect_summaries(results_dir):
 
 
 def table_case1(hist):
+    required = {"method", "experiment", "dataset", "model", "seed", "pb_signal", "gen_gap_loss", "val_nll", "val_ece"}
+    if hist.empty or not required.issubset(hist.columns):
+        return pd.DataFrame()
     rows = []
     df = hist[hist["method"] == "reliability"].copy()
     for keys, d in df.groupby(["experiment", "dataset", "model", "seed"]):
@@ -62,6 +66,9 @@ def table_case1(hist):
 
 
 def table_case2(hist):
+    required = {"method", "experiment", "dataset", "model", "seed", "pd_signal", "grad_norm", "update_norm", "risk_violation_vt", "val_nll"}
+    if hist.empty or not required.issubset(hist.columns):
+        return pd.DataFrame()
     rows = []
     df = hist[hist["method"] == "reliability"].copy()
     for keys, d in df.groupby(["experiment", "dataset", "model", "seed"]):
@@ -81,6 +88,8 @@ def table_case2(hist):
 
 
 def aggregate(summary, metrics):
+    if summary.empty or not {"experiment", "dataset", "model", "method"}.issubset(summary.columns):
+        return pd.DataFrame()
     rows = []
     for keys, d in summary.groupby(["experiment", "dataset", "model", "method"]):
         row = dict(zip(["experiment", "dataset", "model", "method"], keys))
@@ -92,6 +101,8 @@ def aggregate(summary, metrics):
 
 
 def table_case5(summary):
+    if summary.empty or not {"experiment", "dataset", "model", "method"}.issubset(summary.columns):
+        return pd.DataFrame()
     rows = []
     for keys, d in summary.groupby(["experiment", "dataset", "model", "method"]):
         row = dict(zip(["experiment", "dataset", "model", "method"], keys))
@@ -110,13 +121,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--results-dir", default="results")
     parser.add_argument("--out-dir", default="tables")
+    parser.add_argument("--include-quick", action="store_true", help="Include quick-test experiments in outputs.")
     args = parser.parse_args()
 
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    hist = collect_histories(args.results_dir)
-    summary = collect_summaries(args.results_dir)
+    hist = load_histories(args.results_dir, include_quick=args.include_quick)
+    summary = load_summaries(args.results_dir, include_quick=args.include_quick)
 
     table_case1(hist).to_csv(out / "table_4_3_case1_pac_bayes_signal_validity.csv", index=False)
     table_case2(hist).to_csv(out / "table_4_4_case2_primal_dual_stability.csv", index=False)

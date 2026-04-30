@@ -1,5 +1,6 @@
 {
-  "experiment_name": "cifar100_resnet50",
+  "experiment_name": "supp_cifar100_resnet50",
+  "experiment_type": "supplement",
   "dataset": "cifar100",
   "model": "resnet50",
   "methods": [
@@ -14,7 +15,7 @@
   ],
   "epochs": 120,
   "batch_size": 128,
-  "num_workers": 4,
+  "num_workers": 8,
   "optimizer": "sgd",
   "lr": 0.1,
   "momentum": 0.9,

@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
 
 from src.metrics import area_under_curve  # noqa: E402
 from src.plot_style import METHOD_LABELS, METHOD_ORDER  # noqa: E402
+from src.results_io import filter_quick  # noqa: E402
 from src.stats_utils import format_p_value, paired_ttest, p_stars, spearman_with_p  # noqa: E402
 
 
@@ -353,13 +354,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--results-dir", default="results")
     parser.add_argument("--out-dir", default="tables_conclusion")
+    parser.add_argument("--include-quick", action="store_true", help="Include quick-test experiments in outputs.")
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    hist = collect_histories(args.results_dir)
-    summary = collect_summaries(args.results_dir)
+    hist = filter_quick(collect_histories(args.results_dir), include_quick=args.include_quick)
+    summary = filter_quick(collect_summaries(args.results_dir), include_quick=args.include_quick)
 
     t43 = table_43(hist)
     t43.to_csv(out_dir / "table_4_3_pac_bayes_signal_validity.csv", index=False)

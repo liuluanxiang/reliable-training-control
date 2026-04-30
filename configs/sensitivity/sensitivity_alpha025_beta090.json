@@ -1,18 +1,19 @@
 {
-  "experiment_name": "quick_cifar10_resnet18",
-  "experiment_type": "quick",
+  "experiment_name": "sens_cifar10_resnet18_alpha025_beta090",
+  "experiment_type": "sensitivity",
   "dataset": "cifar10",
   "model": "resnet18",
   "methods": [
-    "cosine",
     "reliability"
   ],
   "seeds": [
-    1
+    1,
+    2,
+    3
   ],
-  "epochs": 3,
+  "epochs": 90,
   "batch_size": 128,
-  "num_workers": 2,
+  "num_workers": 4,
   "optimizer": "sgd",
   "lr": 0.1,
   "momentum": 0.9,
@@ -23,7 +24,7 @@
   "device": "cuda",
   "deterministic": false,
   "controller": {
-    "alpha": 0.5,
+    "alpha": 0.25,
     "beta": 0.9,
     "gamma": 0.5,
     "min_lr": 1e-05,

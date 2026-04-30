@@ -13,7 +13,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.metrics import reliability_bins, risk_coverage_curve  # noqa: E402
-from src.plot_style import METHOD_LABELS, METHOD_ORDER, PALETTE, panel_label, save_figure, set_nature_style  # noqa: E402
+from src.plot_style import (  # noqa: E402
+    METHOD_LABELS, METHOD_ORDER, PALETTE, add_panel_label, add_stat_annotation,
+    draw_schematic_sequence, place_legend_safely, save_figure, set_nature_style,
+)
+from src.results_io import filter_quick  # noqa: E402
 from src.stats_utils import format_p_value, mean_ci, paired_ttest, spearman_with_p  # noqa: E402
 
 
@@ -101,23 +105,10 @@ def subset_first_experiment(df):
 
 
 def add_schematic(ax, title, nodes, arrows=None):
-    ax.axis("off")
-    ax.set_title(title, loc="left")
-    xs = np.linspace(0.12, 0.88, len(nodes))
-    y = 0.5
-    for x, label in zip(xs, nodes):
-        face = "#F7F7F7"
-        edge = PALETTE["accent"] if "PB" in label or "PD" in label or "Ours" in label or "LR" in label else "#A0A0A0"
-        ax.text(
-            x, y, label, ha="center", va="center", fontsize=8,
-            bbox=dict(boxstyle="round,pad=0.28", facecolor=face, edgecolor=edge, linewidth=1.0),
-        )
-    for i in range(len(nodes) - 1):
-        ax.annotate("", xy=(xs[i + 1] - 0.07, y), xytext=(xs[i] + 0.07, y),
-                    arrowprops=dict(arrowstyle="->", lw=1.0, color=PALETTE["axis"]))
+    draw_schematic_sequence(ax, title, nodes)
     if arrows:
         for text, x, yy in arrows:
-            ax.text(x, yy, text, ha="center", va="center", fontsize=7, color=PALETTE["gray"])
+            ax.text(x, yy, text, transform=ax.transAxes, ha="center", va="center", fontsize=7, color=PALETTE["gray"])
 
 
 def trajectory_ci(ax, df, metric, methods=None, title="", ylabel="", reliability_only=False):
@@ -151,11 +142,10 @@ def trajectory_ci(ax, df, metric, methods=None, title="", ylabel="", reliability
         alpha = 0.22 if method == "reliability" else 0.12
         ax.plot(x, mean, color=color_for(method), lw=lw, label=method_label(method), zorder=3 if method == "reliability" else 2)
         ax.fill_between(x, lo, hi, color=color_for(method), alpha=alpha, linewidth=0)
-    ax.set_title(title)
+    ax.set_title(title, pad=8)
     ax.set_xlabel("Epoch")
     ax.set_ylabel(ylabel or metric)
-    if not reliability_only:
-        ax.legend(frameon=False, ncol=2)
+    place_legend_safely(ax, preferred="best", outside_if_needed=not reliability_only, ncol=1)
 
 
 def scatter_with_regression(ax, df, x_col, y_col, title, xlabel, ylabel):
@@ -178,9 +168,9 @@ def scatter_with_regression(ax, df, x_col, y_col, title, xlabel, ylabel):
     except Exception:
         pass
     rho, p = spearman_with_p(x, y)
-    ax.text(0.04, 0.96, f"Spearman rho = {rho:.2f}\n{format_p_value(p)}",
-            transform=ax.transAxes, va="top", ha="left", fontsize=7)
-    ax.set_title(title)
+    annotation_loc = "top-left" if np.isfinite(rho) and rho >= 0 else "top-right"
+    add_stat_annotation(ax, f"Spearman rho = {rho:.2f}\n{format_p_value(p)}", loc=annotation_loc)
+    ax.set_title(title, pad=8)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
 
@@ -219,13 +209,16 @@ def dot_plot(ax, df, metric, title, ylabel="", methods=None, ci=True, sd=False, 
                     color=PALETTE["axis"], capsize=2.5, zorder=4)
     ax.set_xticks(range(len(methods)))
     ax.set_xticklabels([method_label(m) for m in methods], rotation=30, ha="right")
-    ax.set_title(title)
+    ax.set_title(title, pad=8)
     ax.set_ylabel(ylabel or metric)
+    ymin, ymax = ax.get_ylim()
+    if np.isfinite(ymin) and np.isfinite(ymax) and ymax > ymin:
+        pad = 0.16 * (ymax - ymin) if significance else 0.08 * (ymax - ymin)
+        ax.set_ylim(ymin, ymax + pad)
     if significance and "reliability" in methods:
         p = ours_vs_best_baseline_p(df, metric, higher=higher)
         if np.isfinite(p):
-            ax.text(0.98, 0.96, f"Ours vs best baseline\n{format_p_value(p)}",
-                    transform=ax.transAxes, ha="right", va="top", fontsize=7)
+            add_stat_annotation(ax, f"Ours vs best baseline\n{format_p_value(p)}", loc="top-right")
 
 
 def ours_vs_best_baseline_p(summary, metric, higher=True):
@@ -269,7 +262,7 @@ def pb_seed_correlations(hist):
 def figure_46(hist, out_dir):
     df = subset_first_experiment(hist)
     rel = df[df.get("method", "") == "reliability"] if not df.empty and "method" in df.columns else pd.DataFrame()
-    fig, axes = plt.subplots(3, 2, figsize=(7.3, 7.6))
+    fig, axes = plt.subplots(3, 2, figsize=(7.8, 8.2), constrained_layout=True)
     axes = axes.ravel()
     add_schematic(axes[0], "PB_t links model movement to reliability", [r"$\theta_0$", r"$\theta_t$", "Val NLL", r"$PB_t$"])
     trajectory_ci(axes[1], rel, "pb_signal", reliability_only=True, title="PB_t rises with reliability pressure", ylabel=r"$PB_t$")
@@ -295,8 +288,8 @@ def figure_46(hist, out_dir):
         axes[5].set_ylabel(r"$\rho(PB_t, G_t)$")
         axes[5].set_title("Positive association holds across runs")
     for ax, lab in zip(axes, "abcdef"):
-        panel_label(ax, lab)
-    fig.suptitle("Figure 4.6 | PB_t tracks generalization reliability", y=1.01, fontsize=10)
+        add_panel_label(ax, lab)
+    fig.suptitle("Figure 4.6 | PB_t tracks generalization reliability", y=1.02, fontsize=10)
     save_figure(fig, Path(out_dir) / "fig_4_6_conclusion_pb_generalization")
 
 
@@ -320,7 +313,7 @@ def pd_seed_spikes(hist):
 def figure_47(hist, out_dir):
     df = subset_first_experiment(hist)
     rel = df[df.get("method", "") == "reliability"] if not df.empty and "method" in df.columns else pd.DataFrame()
-    fig, axes = plt.subplots(3, 2, figsize=(7.3, 7.6))
+    fig, axes = plt.subplots(3, 2, figsize=(7.8, 8.2), constrained_layout=True)
     axes = axes.ravel()
     add_schematic(axes[0], "PD_t summarizes optimization pressure", [r"$V_t$", r"$H_t$", r"$U_t$", r"$PD_t$"])
     trajectory_ci(axes[1], rel, "pd_signal", reliability_only=True, title="PD_t exposes instability phases", ylabel=r"$PD_t$")
@@ -330,7 +323,7 @@ def figure_47(hist, out_dir):
         seed = rel["seed"].dropna().unique()[0] if "seed" in rel.columns and len(rel["seed"].dropna()) else None
         d = rel[rel["seed"] == seed] if seed is not None else rel
         sc = axes[2].scatter(d["grad_norm"], d["update_norm"], c=d["epoch"], cmap="viridis", s=18, alpha=0.8)
-        plt.colorbar(sc, ax=axes[2], fraction=0.046, pad=0.04, label="Epoch")
+        plt.colorbar(sc, ax=axes[2], fraction=0.046, pad=0.055, label="Epoch")
         axes[2].set_xlabel(r"$H_t$ gradient norm")
         axes[2].set_ylabel(r"$U_t$ update norm")
         axes[2].set_title("Gradient-update phases separate")
@@ -370,18 +363,18 @@ def figure_47(hist, out_dir):
         axes[5].set_ylabel("Spike count")
         axes[5].set_title("Instability burden varies by run")
     for ax, lab in zip(axes, "abcdef"):
-        panel_label(ax, lab)
-    fig.suptitle("Figure 4.7 | PD_t captures optimization instability", y=1.01, fontsize=10)
+        add_panel_label(ax, lab)
+    fig.suptitle("Figure 4.7 | PD_t captures optimization instability", y=1.02, fontsize=10)
     save_figure(fig, Path(out_dir) / "fig_4_7_conclusion_pd_stability")
 
 
 def figure_48(hist, summary, out_dir):
     df = subset_first_experiment(hist)
     sdf = summary.copy()
-    fig, axes = plt.subplots(3, 2, figsize=(7.3, 7.6))
+    fig, axes = plt.subplots(3, 2, figsize=(7.9, 8.3), constrained_layout=True)
     axes = axes.ravel()
     add_schematic(axes[0], "Reliability control converts signals into actions",
-                  [r"$PB_t + PD_t$", r"$R_t$", r"$\bar{R}_t$", "LR drop / stop"])
+                  [r"$PB_t + PD_t$", r"$R_t$", r"$\bar{R}_t$", "LR drop\n/ stop"])
     trajectory_ci(axes[1], df, "lr", title="Ours changes LR at distinct phases", ylabel="Learning rate")
     axes[1].set_yscale("log")
     trajectory_ci(axes[2], df, "val_acc", title="Accuracy trajectory remains competitive", ylabel="Val accuracy")
@@ -404,14 +397,14 @@ def figure_48(hist, summary, out_dir):
             labels.append(f"{method_label(method)} s{seed}")
             y += 1
         axes[4].set_yticks(range(len(labels)))
-        axes[4].set_yticklabels(labels, fontsize=6)
+        axes[4].set_yticklabels(labels, fontsize=5.8)
         axes[4].set_xlabel("Epoch")
-        axes[4].set_title("Control events align to training phases")
+        axes[4].set_title("Control events align to training phases", pad=8)
     dot_plot(axes[5], sdf, "test_acc", "Endpoint accuracy favors Ours", "Test accuracy",
              higher=True, significance=True)
     for ax, lab in zip(axes, "abcdef"):
-        panel_label(ax, lab)
-    fig.suptitle("Figure 4.8 | The controller adapts learning rate at meaningful phases", y=1.01, fontsize=10)
+        add_panel_label(ax, lab)
+    fig.suptitle("Figure 4.8 | The controller adapts learning rate at meaningful phases", y=1.02, fontsize=10)
     save_figure(fig, Path(out_dir) / "fig_4_8_conclusion_lr_control")
 
 
@@ -470,7 +463,7 @@ def read_risk_coverage(results_dir, experiment, method):
 def figure_49(summary, results_dir, out_dir):
     sdf = summary.copy()
     exp = choose_experiment(summary)
-    fig, axes = plt.subplots(3, 2, figsize=(7.3, 7.6))
+    fig, axes = plt.subplots(3, 2, figsize=(7.9, 8.3), constrained_layout=True)
     axes = axes.ravel()
     dot_plot(axes[0], sdf, "test_acc", "Accuracy is preserved", "Test accuracy", higher=True, significance=True)
     dot_plot(axes[1], sdf, "test_nll", "Predictive risk improves", "Test NLL", higher=False, significance=True)
@@ -491,8 +484,8 @@ def figure_49(summary, results_dir, out_dir):
         axes[4].set_ylim(0, 1)
         axes[4].set_xlabel("Confidence")
         axes[4].set_ylabel("Accuracy")
-        axes[4].set_title("Reliability diagram moves toward diagonal")
-        axes[4].legend(frameon=False)
+        axes[4].set_title("Reliability diagram moves toward diagonal", pad=8)
+        place_legend_safely(axes[4], preferred="lower right", outside_if_needed="always")
         for method in ["cosine", "plateau", "reliability"]:
             d = read_risk_coverage(results_dir, exp, method)
             if not d.empty and {"coverage", "risk"}.issubset(d.columns):
@@ -500,17 +493,17 @@ def figure_49(summary, results_dir, out_dir):
                 axes[5].plot(d["coverage"], d["risk"], lw=lw, color=color_for(method), label=method_label(method))
         axes[5].set_xlabel("Coverage")
         axes[5].set_ylabel("Risk")
-        axes[5].set_title("Selective risk falls at matched coverage")
-        axes[5].legend(frameon=False)
+        axes[5].set_title("Selective risk falls at matched coverage", pad=8)
+        place_legend_safely(axes[5], preferred="upper right", outside_if_needed="always")
     for ax, lab in zip(axes, "abcdef"):
-        panel_label(ax, lab)
-    fig.suptitle("Figure 4.9 | The controller improves calibration and reliability beyond accuracy", y=1.01, fontsize=10)
+        add_panel_label(ax, lab)
+    fig.suptitle("Figure 4.9 | The controller improves calibration and reliability beyond accuracy", y=1.02, fontsize=10)
     save_figure(fig, Path(out_dir) / "fig_4_9_conclusion_calibration_reliability")
 
 
 def figure_410(summary, out_dir):
     sdf = summary.copy()
-    fig, axes = plt.subplots(3, 2, figsize=(7.3, 7.6))
+    fig, axes = plt.subplots(3, 2, figsize=(7.8, 8.2), constrained_layout=True)
     axes = axes.ravel()
     dot_plot(axes[0], sdf, "test_acc", "Accuracy is less seed-sensitive", "Test accuracy", sd=True)
     dot_plot(axes[1], sdf, "test_nll", "Risk variance is reduced", "Test NLL", sd=True, higher=False)
@@ -535,7 +528,7 @@ def figure_410(summary, out_dir):
         axes[4].set_yticks(range(len(methods)))
         axes[4].set_yticklabels([method_label(m) for m in methods])
         axes[4].set_title("Coefficient-of-variation heatmap")
-        plt.colorbar(im, ax=axes[4], fraction=0.046, pad=0.04)
+        plt.colorbar(im, ax=axes[4], fraction=0.046, pad=0.055)
     if sdf.empty or not {"method", "seed", "test_acc"}.issubset(sdf.columns):
         unavailable(axes[5])
     else:
@@ -557,10 +550,10 @@ def figure_410(summary, out_dir):
         axes[5].set_yticklabels([method_label(m) for m in methods])
         axes[5].set_xlabel("Seed")
         axes[5].set_title("Rank stability across seeds")
-        plt.colorbar(im, ax=axes[5], fraction=0.046, pad=0.04, label="Rank")
+        plt.colorbar(im, ax=axes[5], fraction=0.046, pad=0.055, label="Rank")
     for ax, lab in zip(axes, "abcdef"):
-        panel_label(ax, lab)
-    fig.suptitle("Figure 4.10 | The controller improves seed-level stability", y=1.01, fontsize=10)
+        add_panel_label(ax, lab)
+    fig.suptitle("Figure 4.10 | The controller improves seed-level stability", y=1.02, fontsize=10)
     save_figure(fig, Path(out_dir) / "fig_4_10_conclusion_seed_stability")
 
 
@@ -568,14 +561,15 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--results-dir", default="results")
     parser.add_argument("--out-dir", default="figures_conclusion")
+    parser.add_argument("--include-quick", action="store_true", help="Include quick-test experiments in outputs.")
     args = parser.parse_args()
 
     set_nature_style()
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    hist = collect_histories(args.results_dir)
-    summary = collect_summaries(args.results_dir)
+    hist = filter_quick(collect_histories(args.results_dir), include_quick=args.include_quick)
+    summary = filter_quick(collect_summaries(args.results_dir), include_quick=args.include_quick)
 
     figure_46(hist, out_dir)
     figure_47(hist, out_dir)

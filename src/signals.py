@@ -44,6 +44,7 @@ class ReliabilitySignals:
         self.prev_state = None
         self.z_pb = RunningZ()
         self.z_pd = RunningZ()
+        self.z_val = RunningZ()
         self.rbar = None
 
     @torch.no_grad()
@@ -85,7 +86,7 @@ class ReliabilitySignals:
             total += torch.sum(diff ** 2).item()
         return total / (2.0 * sigma2)
 
-    def compute(self, model, train_nll, val_nll, grad_norm, update_norm):
+    def compute(self, model, train_nll, val_nll, grad_norm, update_norm, variant="reliability"):
         c_t = self.complexity_ct(model)
         n = max(1, self.n_train)
 
@@ -95,9 +96,20 @@ class ReliabilitySignals:
 
         pb_z = self.z_pb.update(pb)
         pd_z = self.z_pd.update(pd)
-        r = self.cfg.alpha * pb_z + (1.0 - self.cfg.alpha) * pd_z
+        val_z = self.z_val.update(val_nll)
 
-        if self.rbar is None:
+        if variant == "reliability_pb_only":
+            r = pb_z
+        elif variant == "reliability_pd_only":
+            r = pd_z
+        elif variant == "reliability_val_loss_only":
+            r = val_z
+        else:
+            r = self.cfg.alpha * pb_z + (1.0 - self.cfg.alpha) * pd_z
+
+        if variant == "reliability_no_smoothing":
+            self.rbar = r
+        elif self.rbar is None:
             self.rbar = r
         else:
             self.rbar = self.cfg.beta * self.rbar + (1.0 - self.cfg.beta) * r
@@ -109,6 +121,7 @@ class ReliabilitySignals:
             "pd_signal": pd,
             "pb_z": pb_z,
             "pd_z": pd_z,
+            "val_loss_z": val_z,
             "reliability_r": r,
             "reliability_rbar": self.rbar,
         }

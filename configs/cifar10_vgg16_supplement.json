@@ -1,5 +1,6 @@
 {
-  "experiment_name": "cifar10_vgg16",
+  "experiment_name": "supp_cifar10_vgg16",
+  "experiment_type": "supplement",
   "dataset": "cifar10",
   "model": "vgg16",
   "methods": [
@@ -11,9 +12,9 @@
     2,
     3
   ],
-  "epochs": 90,
+  "epochs": 120,
   "batch_size": 128,
-  "num_workers": 4,
+  "num_workers": 8,
   "optimizer": "sgd",
   "lr": 0.1,
   "momentum": 0.9,

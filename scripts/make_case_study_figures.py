@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
 
 from src.plot_style import set_nature_style, save_figure, panel_label, PALETTE, LABELS
 from src.metrics import spearman_np
+from src.results_io import collect_histories as load_histories, collect_summaries as load_summaries
 
 
 def collect_histories(results_dir):
@@ -283,14 +284,18 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--results-dir", default="results")
     parser.add_argument("--out-dir", default="figures")
+    parser.add_argument("--include-quick", action="store_true", help="Include quick-test experiments in outputs.")
     args = parser.parse_args()
 
     set_nature_style()
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    hist = collect_histories(args.results_dir)
-    summary = collect_summaries(args.results_dir)
+    hist = load_histories(args.results_dir, include_quick=args.include_quick)
+    summary = load_summaries(args.results_dir, include_quick=args.include_quick)
+    if hist.empty:
+        print(f"No history.csv files found under {args.results_dir}; no case-study figures generated.")
+        return
 
     fig_case1(hist, out)
     fig_case2(hist, out)
