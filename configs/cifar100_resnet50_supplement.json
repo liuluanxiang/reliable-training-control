@@ -4,6 +4,7 @@
   "dataset": "cifar100",
   "model": "resnet50",
   "methods": [
+    "step",
     "cosine",
     "plateau",
     "reliability"

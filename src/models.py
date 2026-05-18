@@ -19,6 +19,7 @@ def build_model(name: str, num_classes: int):
 
     if name == "vgg16":
         model = models.vgg16_bn(weights=None, num_classes=num_classes)
+        model.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         model.classifier = nn.Sequential(
             nn.Linear(512, 512),
             nn.ReLU(True),

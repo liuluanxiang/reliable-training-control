@@ -36,6 +36,36 @@ def mean_std(values):
     return mean, std
 
 
+def bootstrap_ci(values, n_boot=5000, ci=0.95, seed=123):
+    vals = _clean(values)
+    if len(vals) == 0:
+        return np.nan, np.nan
+    if len(vals) == 1:
+        return float(vals[0]), float(vals[0])
+    rng = np.random.default_rng(seed)
+    means = np.empty(int(n_boot), dtype=float)
+    for idx in range(len(means)):
+        means[idx] = rng.choice(vals, size=len(vals), replace=True).mean()
+    alpha = (1.0 - ci) / 2.0
+    return float(np.quantile(means, alpha)), float(np.quantile(means, 1.0 - alpha))
+
+
+def holm_bonferroni(p_values):
+    pvals = np.asarray(p_values, dtype=float)
+    adjusted = np.full(len(pvals), np.nan, dtype=float)
+    valid = np.where(np.isfinite(pvals))[0]
+    if len(valid) == 0:
+        return adjusted
+    order = valid[np.argsort(pvals[valid])]
+    running = 0.0
+    n = len(order)
+    for rank, idx in enumerate(order):
+        adj = min(1.0, (n - rank) * pvals[idx])
+        running = max(running, adj)
+        adjusted[idx] = running
+    return adjusted
+
+
 def paired_ttest(a, b):
     a = np.asarray(a, dtype=float)
     b = np.asarray(b, dtype=float)
@@ -115,6 +145,7 @@ LOWER_BETTER = {
     "final_gen_gap_loss", "late_degradation",
 }
 BASELINE_METHODS = ["step", "cosine", "plateau"]
+FULL_METHODS = ["reliability", "reliability_full"]
 
 
 def metric_higher_is_better(metric):
@@ -130,7 +161,8 @@ def compare_ours_vs_best_baseline(summary_df, metric, group_cols):
 
     columns = list(group_cols) + [
         "metric", "ours", "best_baseline", "best_baseline_name", "mean_difference",
-        "cohen_d", "paired_ttest_p", "wilcoxon_p", "significance", "n_pairs",
+        "ci95_low", "ci95_high", "cohen_d", "paired_ttest_p", "wilcoxon_p",
+        "significance", "n_pairs",
     ]
     if summary_df is None or len(summary_df) == 0 or metric not in summary_df.columns:
         return pd.DataFrame(columns=columns)
@@ -142,7 +174,7 @@ def compare_ours_vs_best_baseline(summary_df, metric, group_cols):
     for keys, group in summary_df.groupby(list(group_cols), dropna=False):
         if not isinstance(keys, tuple):
             keys = (keys,)
-        ours = group[group["method"] == "reliability"]
+        ours = group[group["method"].isin(FULL_METHODS)]
         baselines = group[group["method"].isin(BASELINE_METHODS)]
         if ours.empty or baselines.empty:
             continue
@@ -162,7 +194,9 @@ def compare_ours_vs_best_baseline(summary_df, metric, group_cols):
             t_p = paired_ttest(ours_vals, best_vals)
             w_p = wilcoxon_test(ours_vals, best_vals)
             d = cohens_d(ours_vals, best_vals)
-            diff = float(np.nanmean(ours_vals - best_vals))
+            diffs = ours_vals - best_vals
+            diff = float(np.nanmean(diffs))
+            ci_lo, ci_hi = bootstrap_ci(diffs)
             marker = significance_marker(t_p)
         else:
             ours_vals = np.asarray([], dtype=float)
@@ -171,6 +205,8 @@ def compare_ours_vs_best_baseline(summary_df, metric, group_cols):
             w_p = np.nan
             d = np.nan
             diff = np.nan
+            ci_lo = np.nan
+            ci_hi = np.nan
             marker = "n/a"
 
         ours_mean = float(pd.to_numeric(ours[metric], errors="coerce").mean())
@@ -182,6 +218,8 @@ def compare_ours_vs_best_baseline(summary_df, metric, group_cols):
             "best_baseline": best_mean,
             "best_baseline_name": best_name,
             "mean_difference": diff,
+            "ci95_low": ci_lo,
+            "ci95_high": ci_hi,
             "cohen_d": d,
             "paired_ttest_p": t_p,
             "wilcoxon_p": w_p,

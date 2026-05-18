@@ -19,3 +19,19 @@ fi
 if [ -f make_conclusion_figures.py ]; then
   python make_conclusion_figures.py --results-dir "$RESULTS_DIR" --out-dir "figures_conclusion/${RUN_TAG}"
 fi
+
+if [ -f generate_statistical_tables.py ]; then
+  python generate_statistical_tables.py --results-dir "$RESULTS_DIR" --out-dir "statistical_tables/${RUN_TAG}"
+fi
+
+if [ -f make_statistical_figures.py ]; then
+  python make_statistical_figures.py --results-dir "$RESULTS_DIR" --out-dir "statistical_figures/${RUN_TAG}"
+fi
+
+python audit_experiment_results.py \
+  --results-dir "$RESULTS_DIR" \
+  --config configs/cifar100_resnet50_supplement.json \
+  --config configs/cifar100_vgg16_supplement.json \
+  --check-statistical \
+  --statistical-tables-dir "statistical_tables/${RUN_TAG}" \
+  --statistical-figures-dir "statistical_figures/${RUN_TAG}"

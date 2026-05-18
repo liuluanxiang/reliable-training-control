@@ -4,10 +4,12 @@ import re
 import sys
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import torch  # noqa: F401 - kept as an allowed project dependency for this analysis script.
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -17,23 +19,29 @@ from src.plot_style import (  # noqa: E402
     PALETTE, add_panel_label, save_figure, set_nature_style,
 )
 from src.results_io import filter_quick  # noqa: E402
-from src.stats_utils import mean_ci  # noqa: E402
+from src.stats_utils import compare_ours_vs_best_baseline, mean_ci  # noqa: E402
 
 
 METHOD_LABELS = {
     "reliability": "Ours / Full",
+    "reliability_full": "Ours / Full",
     "reliability_pb_only": "PB-only",
     "reliability_pd_only": "PD-only",
     "reliability_no_smoothing": "No smoothing",
+    "reliability_no_ema": "No smoothing",
     "reliability_val_loss_only": "Val-loss only",
+    "reliability_monitor_only": "Monitor-only",
 }
 
 ABLATION_METHODS = [
     "reliability",
+    "reliability_full",
     "reliability_pb_only",
     "reliability_pd_only",
     "reliability_no_smoothing",
+    "reliability_no_ema",
     "reliability_val_loss_only",
+    "reliability_monitor_only",
 ]
 
 
@@ -253,6 +261,65 @@ def figure_sensitivity(summary, out_dir):
     save_figure(fig, Path(out_dir) / "fig_4_12_sensitivity_analysis")
 
 
+def figure_statistical_tests(summary, out_dir):
+    if summary.empty:
+        return
+
+    exp_type = summary.get("experiment_type", pd.Series("", index=summary.index)).astype(str)
+    df = summary[~exp_type.isin(["quick", "ablation", "sensitivity"])].copy()
+    metrics = [
+        ("test_acc", "Test accuracy", "a"),
+        ("test_nll", "Test NLL", "b"),
+        ("test_ece", "ECE", "c"),
+        ("test_brier", "Brier score", "d"),
+    ]
+    fig, axes = plt.subplots(2, 2, figsize=(7.6, 5.9), constrained_layout=True)
+    axes = axes.ravel()
+
+    for ax, (metric, title, label) in zip(axes, metrics):
+        comp = compare_ours_vs_best_baseline(df, metric, ["dataset", "model", "experiment"])
+        if comp.empty:
+            unavailable(ax, f"{metric} unavailable")
+            ax.set_title(title, pad=8)
+            add_panel_label(ax, label)
+            continue
+
+        comp = comp.sort_values(["dataset", "model", "experiment"])
+        comp = comp[pd.to_numeric(comp["mean_difference"], errors="coerce").notna()].copy()
+        if comp.empty:
+            unavailable(ax, f"{metric} unavailable")
+            ax.set_title(title, pad=8)
+            add_panel_label(ax, label)
+            continue
+        labels = [
+            f"{row.dataset}\n{row.model}\nvs {method_label(row.best_baseline_name)}"
+            for row in comp.itertuples(index=False)
+        ]
+        y = pd.to_numeric(comp["mean_difference"], errors="coerce").to_numpy(float)
+        lo = pd.to_numeric(comp["ci95_low"], errors="coerce").to_numpy(float)
+        hi = pd.to_numeric(comp["ci95_high"], errors="coerce").to_numpy(float)
+        x = np.arange(len(comp))
+        yerr = np.vstack([y - lo, hi - y])
+        yerr = np.where(np.isfinite(yerr), np.maximum(0.0, yerr), 0.0)
+
+        ax.bar(x, y, yerr=yerr, capsize=2.5, color=PALETTE["reliability"], alpha=0.84)
+        ax.axhline(0.0, color=PALETTE["axis"], linewidth=0.8)
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=35, ha="right")
+        ax.set_ylabel("Paired difference")
+        ax.set_title(title, pad=8)
+        max_abs = np.nanmax(np.abs(y)) if len(y) else 1.0
+        offset = 0.03 * max(max_abs, 1e-8)
+        for idx, row in enumerate(comp.itertuples(index=False)):
+            marker = str(row.significance)
+            if marker in {"*", "**", "***"} and np.isfinite(y[idx]):
+                ax.text(idx, y[idx] + offset, marker, ha="center", va="bottom", fontsize=8)
+        add_panel_label(ax, label)
+
+    fig.suptitle("Figure 4.13 | Paired statistical tests against best baselines", y=1.02, fontsize=10)
+    save_figure(fig, Path(out_dir) / "fig_4_13_statistical_tests")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--results-dir", default="results")
@@ -267,6 +334,7 @@ def main():
     summary = filter_quick(collect_summaries(args.results_dir), include_quick=args.include_quick)
     figure_ablation(summary, out_dir)
     figure_sensitivity(summary, out_dir)
+    figure_statistical_tests(summary, out_dir)
 
     print(f"Saved statistical figures to {out_dir}")
 

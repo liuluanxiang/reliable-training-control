@@ -10,6 +10,8 @@ $TablesDir = "tables\$RunTag"
 $FiguresDir = "figures\$RunTag"
 $ConclusionTablesDir = "tables_conclusion\$RunTag"
 $ConclusionFiguresDir = "figures_conclusion\$RunTag"
+$StatisticalTablesDir = "statistical_tables\$RunTag"
+$StatisticalFiguresDir = "statistical_figures\$RunTag"
 $ExperimentSuffix = "__$RunTag"
 
 Write-Host "Run tag: $RunTag"
@@ -34,3 +36,13 @@ if (Test-Path generate_conclusion_tables.py) {
 if (Test-Path make_conclusion_figures.py) {
     & $Python make_conclusion_figures.py --results-dir $ResultsDir --out-dir $ConclusionFiguresDir
 }
+
+if (Test-Path generate_statistical_tables.py) {
+    & $Python generate_statistical_tables.py --results-dir $ResultsDir --out-dir $StatisticalTablesDir
+}
+
+if (Test-Path make_statistical_figures.py) {
+    & $Python make_statistical_figures.py --results-dir $ResultsDir --out-dir $StatisticalFiguresDir
+}
+
+& $Python audit_experiment_results.py --results-dir $ResultsDir --suite main --check-statistical --statistical-tables-dir $StatisticalTablesDir --statistical-figures-dir $StatisticalFiguresDir

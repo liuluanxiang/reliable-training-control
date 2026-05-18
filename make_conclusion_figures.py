@@ -68,6 +68,12 @@ def collect_summaries(results_dir):
     return pd.DataFrame(rows)
 
 
+def filter_main_supplement(df):
+    if df.empty or "experiment_type" not in df.columns:
+        return df
+    return df[df["experiment_type"].astype(str).isin(["main", "supplement"])].copy()
+
+
 def ordered_methods(methods):
     known = [m for m in METHOD_ORDER if m in set(methods)]
     extra = sorted([m for m in methods if m not in METHOD_ORDER])
@@ -234,12 +240,16 @@ def ours_vs_best_baseline_p(summary, metric, higher=True):
     if means.empty:
         return np.nan
     best = means.idxmax() if higher else means.idxmin()
-    ours = data[data["method"] == "reliability"].set_index("seed")[metric]
-    base = data[data["method"] == best].set_index("seed")[metric]
-    seeds = ours.index.intersection(base.index)
-    if len(seeds) < 2:
+    ours = data[data["method"] == "reliability"].groupby("seed")[metric].mean()
+    base = data[data["method"] == best].groupby("seed")[metric].mean()
+    paired = (
+        pd.DataFrame({"ours": ours, "baseline": base})
+        .dropna()
+        .sort_index()
+    )
+    if len(paired) < 2:
         return np.nan
-    return paired_ttest(ours.loc[seeds].to_numpy(), base.loc[seeds].to_numpy())
+    return paired_ttest(paired["ours"].to_numpy(), paired["baseline"].to_numpy())
 
 
 def pb_seed_correlations(hist):
@@ -568,8 +578,8 @@ def main():
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    hist = filter_quick(collect_histories(args.results_dir), include_quick=args.include_quick)
-    summary = filter_quick(collect_summaries(args.results_dir), include_quick=args.include_quick)
+    hist = filter_main_supplement(filter_quick(collect_histories(args.results_dir), include_quick=args.include_quick))
+    summary = filter_main_supplement(filter_quick(collect_summaries(args.results_dir), include_quick=args.include_quick))
 
     figure_46(hist, out_dir)
     figure_47(hist, out_dir)

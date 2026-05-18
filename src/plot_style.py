@@ -7,10 +7,13 @@ PALETTE = {
     "cosine": "#C9A227",
     "plateau": "#5C8F6B",
     "reliability": "#B0004F",
+    "reliability_full": "#B0004F",
     "reliability_pb_only": "#D66BA0",
     "reliability_pd_only": "#8B5FBF",
     "reliability_no_smoothing": "#E07A5F",
+    "reliability_no_ema": "#E07A5F",
     "reliability_val_loss_only": "#4B9CD3",
+    "reliability_monitor_only": "#2F7F7F",
     "gray": "#4D4D4D",
     "lightgray": "#D9D9D9",
     "midgray": "#8A8A8A",
@@ -23,10 +26,13 @@ LABELS = {
     "cosine": "Cosine",
     "plateau": "Plateau",
     "reliability": "Ours",
+    "reliability_full": "Ours",
     "reliability_pb_only": "PB-only",
     "reliability_pd_only": "PD-only",
     "reliability_no_smoothing": "No smoothing",
+    "reliability_no_ema": "No smoothing",
     "reliability_val_loss_only": "Val-loss only",
+    "reliability_monitor_only": "Monitor-only",
 }
 
 METHOD_LABELS = {
@@ -34,15 +40,19 @@ METHOD_LABELS = {
     "cosine": "Cosine",
     "plateau": "Plateau",
     "reliability": "Ours",
+    "reliability_full": "Ours",
     "reliability_pb_only": "PB-only",
     "reliability_pd_only": "PD-only",
     "reliability_no_smoothing": "No smoothing",
+    "reliability_no_ema": "No smoothing",
     "reliability_val_loss_only": "Val-loss only",
+    "reliability_monitor_only": "Monitor-only",
 }
 
 METHOD_ORDER = [
-    "step", "cosine", "plateau", "reliability", "reliability_pb_only",
-    "reliability_pd_only", "reliability_no_smoothing", "reliability_val_loss_only",
+    "step", "cosine", "plateau", "reliability", "reliability_full",
+    "reliability_pb_only", "reliability_pd_only", "reliability_no_smoothing",
+    "reliability_no_ema", "reliability_val_loss_only", "reliability_monitor_only",
 ]
 
 

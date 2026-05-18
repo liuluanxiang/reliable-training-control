@@ -99,7 +99,7 @@ def planned_runs(cfg, existing_policy):
             has_summary = "summary.json" in artifacts
             if not artifacts:
                 status = "will_run"
-            elif existing_policy == "skip":
+            elif existing_policy in ["skip", "rerun-partial"]:
                 status = "skip_completed" if has_summary else "skip_partial"
             elif existing_policy == "error":
                 status = "error_existing"
@@ -144,185 +144,8 @@ def write_dashboard(dashboard_path, state_path):
     state_path = Path(state_path)
     dashboard_path.parent.mkdir(parents=True, exist_ok=True)
     rel_state = os.path.relpath(state_path, dashboard_path.parent).replace("\\", "/")
-    html = f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Experiment Progress</title>
-  <style>
-    :root {{
-      color-scheme: light dark;
-      --bg: #f6f7f9;
-      --panel: #ffffff;
-      --ink: #17202a;
-      --muted: #637083;
-      --line: #d8dee8;
-      --accent: #0f766e;
-      --warn: #b45309;
-      --bad: #b91c1c;
-      --good: #047857;
-    }}
-    @media (prefers-color-scheme: dark) {{
-      :root {{
-        --bg: #111417;
-        --panel: #1a2027;
-        --ink: #eef2f7;
-        --muted: #a8b3c2;
-        --line: #334155;
-        --accent: #2dd4bf;
-        --warn: #f59e0b;
-        --bad: #f87171;
-        --good: #34d399;
-      }}
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      background: var(--bg);
-      color: var(--ink);
-      font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }}
-    header {{
-      border-bottom: 1px solid var(--line);
-      background: var(--panel);
-      padding: 16px 24px;
-      position: sticky;
-      top: 0;
-      z-index: 2;
-    }}
-    h1 {{
-      font-size: 20px;
-      margin: 0 0 6px;
-      font-weight: 700;
-    }}
-    main {{ padding: 20px 24px 32px; max-width: 1440px; margin: 0 auto; }}
-    .muted {{ color: var(--muted); }}
-    .grid {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }}
-    .wide {{ grid-column: span 2; }}
-    .full {{ grid-column: 1 / -1; }}
-    .panel {{
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 14px;
-      min-width: 0;
-    }}
-    .label {{ color: var(--muted); font-size: 12px; margin-bottom: 4px; }}
-    .value {{ font-size: 22px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-    .bar {{
-      height: 12px;
-      background: color-mix(in srgb, var(--line) 75%, transparent);
-      border-radius: 999px;
-      overflow: hidden;
-      margin-top: 8px;
-    }}
-    .fill {{ height: 100%; width: 0; background: var(--accent); transition: width .25s ease; }}
-    table {{ width: 100%; border-collapse: collapse; }}
-    th, td {{ text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }}
-    th {{ color: var(--muted); font-size: 12px; font-weight: 600; }}
-    code {{ font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; }}
-    .status-run {{ color: var(--accent); font-weight: 700; }}
-    .status-done {{ color: var(--good); font-weight: 700; }}
-    .status-skip {{ color: var(--warn); font-weight: 700; }}
-    .status-error {{ color: var(--bad); font-weight: 700; }}
-    .messages {{
-      max-height: 360px;
-      overflow: auto;
-      white-space: pre-wrap;
-      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-      font-size: 12px;
-      background: color-mix(in srgb, var(--panel) 80%, var(--bg));
-    }}
-    @media (max-width: 900px) {{
-      main {{ padding: 14px; }}
-      .grid {{ grid-template-columns: 1fr 1fr; }}
-      .wide {{ grid-column: 1 / -1; }}
-    }}
-    @media (max-width: 560px) {{
-      .grid {{ grid-template-columns: 1fr; }}
-      header {{ padding: 12px 14px; }}
-    }}
-  </style>
-</head>
-<body>
-  <header>
-    <h1>Experiment Progress</h1>
-    <div class="muted" id="subtitle">Waiting for progress_state.json</div>
-  </header>
-  <main>
-    <section class="grid">
-      <div class="panel"><div class="label">Status</div><div class="value" id="status">-</div></div>
-      <div class="panel"><div class="label">Run</div><div class="value" id="run">-</div><div class="bar"><div class="fill" id="runBar"></div></div></div>
-      <div class="panel"><div class="label">Epoch</div><div class="value" id="epoch">-</div><div class="bar"><div class="fill" id="epochBar"></div></div></div>
-      <div class="panel"><div class="label">Batch</div><div class="value" id="batch">-</div><div class="bar"><div class="fill" id="batchBar"></div></div></div>
-      <div class="panel"><div class="label">Epoch Time</div><div class="value" id="epochTime">-</div></div>
-      <div class="panel"><div class="label">Average Epoch</div><div class="value" id="avgEpoch">-</div></div>
-      <div class="panel"><div class="label">ETA Current Run</div><div class="value" id="etaRun">-</div></div>
-      <div class="panel"><div class="label">Best Validation</div><div class="value" id="bestVal">-</div></div>
-      <div class="panel wide"><div class="label">Current</div><div class="value" id="current">-</div></div>
-      <div class="panel wide"><div class="label">Last Update</div><div class="value" id="updated">-</div></div>
-      <div class="panel full">
-        <div class="label">Planned Runs and Collision Policy</div>
-        <div id="plan"></div>
-      </div>
-      <div class="panel full">
-        <div class="label">Recent Messages</div>
-        <div class="messages" id="messages"></div>
-      </div>
-    </section>
-  </main>
-  <script>
-    const stateUrl = "{rel_state}";
-    const fmt = (v) => (v === undefined || v === null || v === "" ? "-" : v);
-    const pct = (a, b) => b ? Math.max(0, Math.min(100, 100 * a / b)) : 0;
-    function setText(id, value) {{ document.getElementById(id).textContent = fmt(value); }}
-    function setBar(id, value) {{ document.getElementById(id).style.width = value.toFixed(1) + "%"; }}
-    function statusClass(status) {{
-      status = status || "";
-      if (status === "completed" || status.includes("done")) return "status-done";
-      if (status.includes("error")) return "status-error";
-      if (status.includes("skip") || status.includes("archive") || status.includes("overwrite")) return "status-skip";
-      return "status-run";
-    }}
-    function render(data) {{
-      const current = data.current || {{}};
-      const runIndex = current.run_index || data.completed_runs || 0;
-      const totalRuns = data.total_runs || 0;
-      setText("subtitle", `${{data.experiment || "-"}} | config=${{data.config_path || "-"}} | policy=${{data.existing_policy || "-"}}`);
-      setText("status", data.status || "-");
-      document.getElementById("status").className = "value " + statusClass(data.status);
-      setText("run", `${{runIndex}}/${{totalRuns}}`);
-      setBar("runBar", pct(runIndex, totalRuns));
-      setText("epoch", current.epoch && current.total_epochs ? `${{current.epoch}}/${{current.total_epochs}}` : "-");
-      setBar("epochBar", pct(current.epoch || 0, current.total_epochs || 0));
-      setText("batch", current.batch && current.total_batches ? `${{current.batch}}/${{current.total_batches}}` : fmt(current.phase));
-      setBar("batchBar", pct(current.batch || 0, current.total_batches || 0));
-      setText("epochTime", current.epoch_time || "-");
-      setText("avgEpoch", current.avg_epoch_time || "-");
-      setText("etaRun", current.eta_run || "-");
-      setText("bestVal", current.best_val_acc !== undefined ? `${{Number(current.best_val_acc).toFixed(4)}} @ ${{current.best_epoch || "-"}}` : "-");
-      setText("current", current.experiment ? `${{current.experiment}} | ${{current.method}} | seed=${{current.seed}} | ${{current.phase || "-"}}` : "-");
-      setText("updated", data.updated_at || "-");
-      const planned = data.planned_runs || [];
-      document.getElementById("plan").innerHTML = `<table><thead><tr><th>#</th><th>Experiment</th><th>Method</th><th>Seed</th><th>Status</th><th>Artifacts</th></tr></thead><tbody>${{planned.map(r => `<tr><td>${{r.run_index}}</td><td><code>${{r.experiment}}</code></td><td>${{r.method}}</td><td>${{r.seed}}</td><td class="${{statusClass(r.status)}}">${{r.status}}</td><td>${{(r.artifacts || []).join(", ") || "-"}}</td></tr>`).join("")}}</tbody></table>`;
-      document.getElementById("messages").textContent = (data.messages || []).join("\\n");
-    }}
-    async function tick() {{
-      try {{
-        const response = await fetch(stateUrl + "?t=" + Date.now(), {{ cache: "no-store" }});
-        render(await response.json());
-      }} catch (err) {{
-        setText("status", "waiting");
-        setText("messages", "Serve the results directory to enable live refresh, for example: python -m http.server 8000 -d results");
-      }}
-    }}
-    tick();
-    setInterval(tick, 2000);
-  </script>
-</body>
-</html>
-"""
+    template_path = Path(__file__).resolve().parent / "src" / "progress_dashboard_template.html"
+    html = template_path.read_text(encoding="utf-8").replace("__STATE_URL__", rel_state)
     dashboard_path.write_text(html, encoding="utf-8")
 
 
@@ -357,6 +180,16 @@ class ProgressLogger:
     def configure_state(self, state_path, dashboard_path=None):
         self.state_path = Path(state_path)
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        preserved = {}
+        if self.state_path.exists():
+            try:
+                previous = json.loads(self.state_path.read_text(encoding="utf-8"))
+                for key in ["main_notice", "pipeline"]:
+                    if key in previous:
+                        preserved[key] = previous[key]
+            except Exception:
+                preserved = {}
+        self.state.update(preserved)
         if dashboard_path:
             self.dashboard_path = Path(dashboard_path)
             write_dashboard(self.dashboard_path, self.state_path)
@@ -632,7 +465,7 @@ def run_one(cfg, method, seed, progress, run_index=1, total_runs=1, existing_pol
     )
 
     if artifacts:
-        if existing_policy == "skip":
+        if existing_policy in ["skip", "rerun-partial"]:
             existing_summary = load_existing_summary(out_dir)
             if existing_summary is not None:
                 progress.log(
@@ -656,24 +489,32 @@ def run_one(cfg, method, seed, progress, run_index=1, total_runs=1, existing_pol
                 })
                 return existing_summary
 
+            if existing_policy == "skip":
+                progress.log(
+                    f"[run {run_index}/{total_runs}] skip partial existing output | "
+                    f"experiment={exp_name} | method={method} | seed={seed} | "
+                    f"artifacts={','.join(artifacts)} | use --existing rerun-partial to archive and rerun"
+                )
+                progress.record_finished({
+                    "run_index": run_index,
+                    "experiment": exp_name,
+                    "method": method,
+                    "seed": seed,
+                    "status": "skipped_partial",
+                })
+                return None
+
+            archive_root = Path(cfg["results_dir"]) / "_archive" / (run_id or make_run_id())
+            archive_dir = archive_existing_output(out_dir, archive_root)
             progress.log(
-                f"[run {run_index}/{total_runs}] skip partial existing output | "
-                f"experiment={exp_name} | method={method} | seed={seed} | "
-                f"artifacts={','.join(artifacts)} | use --existing archive to preserve and rerun"
+                f"[run {run_index}/{total_runs}] archived partial existing output | "
+                f"from={out_dir} | to={archive_dir} | artifacts={','.join(artifacts)}"
             )
-            progress.record_finished({
-                "run_index": run_index,
-                "experiment": exp_name,
-                "method": method,
-                "seed": seed,
-                "status": "skipped_partial",
-            })
-            return None
 
         if existing_policy == "error":
             raise FileExistsError(
                 f"Existing result artifacts found in {out_dir}: {artifacts}. "
-                "Use --existing skip, --existing archive, or --existing overwrite."
+                "Use --existing skip, --existing rerun-partial, --existing archive, or --existing overwrite."
             )
 
         if existing_policy == "archive":
@@ -1007,9 +848,13 @@ def main():
     )
     parser.add_argument(
         "--existing",
-        choices=["skip", "error", "archive", "overwrite"],
+        choices=["skip", "rerun-partial", "error", "archive", "overwrite"],
         default="error",
-        help="Policy when result artifacts already exist for a method/seed. Default aborts to avoid overwrites and silent skips.",
+        help=(
+            "Policy when result artifacts already exist for a method/seed. "
+            "'rerun-partial' skips completed runs but archives incomplete outputs before rerunning. "
+            "Default aborts to avoid overwrites and silent skips."
+        ),
     )
     parser.add_argument(
         "--results-dir",
@@ -1124,7 +969,7 @@ def main():
         if summary_by_seed_path.exists() and not new_df.empty:
             old_summary = pd.read_csv(summary_by_seed_path)
             summary_by_seed = pd.concat([old_summary, new_df], ignore_index=True)
-            keep = "last" if args.existing in ["archive", "overwrite"] else "first"
+            keep = "last" if args.existing in ["rerun-partial", "archive", "overwrite"] else "first"
             summary_by_seed = summary_by_seed.drop_duplicates(["experiment", "method", "seed"], keep=keep)
         elif summary_by_seed_path.exists():
             summary_by_seed = pd.read_csv(summary_by_seed_path)
@@ -1141,7 +986,7 @@ def main():
                 missing = old["experiment_type"].isna() | (old["experiment_type"].astype(str).str.strip() == "")
                 old.loc[missing, "experiment_type"] = old.loc[missing, "experiment"].map(infer_experiment_type)
             combined = pd.concat([old, new_df], ignore_index=True)
-            keep = "last" if args.existing in ["archive", "overwrite"] else "first"
+            keep = "last" if args.existing in ["rerun-partial", "archive", "overwrite"] else "first"
             combined = combined.drop_duplicates(["experiment", "method", "seed"], keep=keep)
         else:
             combined = new_df

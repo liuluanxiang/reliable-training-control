@@ -63,6 +63,12 @@ def collect_summaries(results_dir):
     return pd.DataFrame(rows)
 
 
+def filter_main_supplement(df):
+    if df.empty or "experiment_type" not in df.columns:
+        return df
+    return df[df["experiment_type"].astype(str).isin(["main", "supplement"])].copy()
+
+
 def method_label(method):
     return METHOD_LABELS.get(method, str(method))
 
@@ -121,8 +127,8 @@ def best_baseline_for_metric(group, metric, direction):
 def paired_p_for_ours(group, metric, baseline):
     if baseline is None or "seed" not in group.columns or metric not in group.columns:
         return np.nan
-    ours = group[group["method"] == "reliability"].set_index("seed")[metric]
-    base = group[group["method"] == baseline].set_index("seed")[metric]
+    ours = group[group["method"] == "reliability"].groupby("seed")[metric].mean(numeric_only=True)
+    base = group[group["method"] == baseline].groupby("seed")[metric].mean(numeric_only=True)
     seeds = ours.index.intersection(base.index)
     if len(seeds) < 2:
         return np.nan
@@ -360,8 +366,8 @@ def main():
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    hist = filter_quick(collect_histories(args.results_dir), include_quick=args.include_quick)
-    summary = filter_quick(collect_summaries(args.results_dir), include_quick=args.include_quick)
+    hist = filter_main_supplement(filter_quick(collect_histories(args.results_dir), include_quick=args.include_quick))
+    summary = filter_main_supplement(filter_quick(collect_summaries(args.results_dir), include_quick=args.include_quick))
 
     t43 = table_43(hist)
     t43.to_csv(out_dir / "table_4_3_pac_bayes_signal_validity.csv", index=False)

@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.stats_utils import (  # noqa: E402
-    compare_ours_vs_best_baseline, format_p_value, mean_std,
+    compare_ours_vs_best_baseline, format_p_value, holm_bonferroni, mean_std,
 )
 from src.results_io import filter_quick  # noqa: E402
 
@@ -28,18 +28,24 @@ METHOD_LABELS = {
     "cosine": "Cosine",
     "plateau": "Plateau",
     "reliability": "Ours / Full",
+    "reliability_full": "Ours / Full",
     "reliability_pb_only": "PB-only",
     "reliability_pd_only": "PD-only",
     "reliability_no_smoothing": "No smoothing",
+    "reliability_no_ema": "No smoothing",
     "reliability_val_loss_only": "Val-loss only",
+    "reliability_monitor_only": "Monitor-only",
 }
 
 ABLATION_METHODS = [
     "reliability",
+    "reliability_full",
     "reliability_pb_only",
     "reliability_pd_only",
     "reliability_no_smoothing",
+    "reliability_no_ema",
     "reliability_val_loss_only",
+    "reliability_monitor_only",
 ]
 
 
@@ -85,7 +91,13 @@ def fmt_mean_std(values, digits=4):
     mean, std = mean_std(values)
     if not np.isfinite(mean):
         return ""
-    return f"{mean:.{digits}f} ± {std:.{digits}f}"
+    return f"{mean:.{digits}f} +/- {std:.{digits}f}"
+
+
+def fmt_ci(lo, hi, digits=4):
+    if not np.isfinite(lo) or not np.isfinite(hi):
+        return ""
+    return f"[{lo:.{digits}f}, {hi:.{digits}f}]"
 
 
 def parse_sensitivity_experiment(name):
@@ -151,17 +163,20 @@ def markdown_table(df, path, best_map=None, note=None):
 
 def table_ablation(summary):
     columns = [
-        "Dataset", "Model", "Method", "Test Acc", "Test NLL", "ECE", "Brier",
-        "Gen Gap", "AULC", "LR Reductions", "Epochs Run",
+        "Dataset", "Model", "Method", "Seeds", "Test Acc", "Test Top-5 Acc",
+        "Test NLL", "ECE", "Brier", "Gen Gap", "AULC", "LR Reductions",
+        "Best Epoch", "Epochs Run",
     ]
     metric_map = {
         "Test Acc": "test_acc",
+        "Test Top-5 Acc": "test_top5_acc",
         "Test NLL": "test_nll",
         "ECE": "test_ece",
         "Brier": "test_brier",
         "Gen Gap": "final_gen_gap_loss",
         "AULC": "aulc_val_acc",
         "LR Reductions": "lr_reductions",
+        "Best Epoch": "best_epoch",
         "Epochs Run": "epochs_run",
     }
     if summary.empty or "method" not in summary.columns:
@@ -171,7 +186,12 @@ def table_ablation(summary):
     df = summary[summary["method"].isin(ABLATION_METHODS) & (exp_type == "ablation")].copy()
     rows = []
     for (dataset, model, method), group in df.groupby(["dataset", "model", "method"], dropna=False):
-        row = {"Dataset": dataset, "Model": model, "Method": method_label(method)}
+        row = {
+            "Dataset": dataset,
+            "Model": model,
+            "Method": method_label(method),
+            "Seeds": int(group["seed"].nunique()) if "seed" in group.columns else len(group),
+        }
         for label, metric in metric_map.items():
             row[label] = fmt_mean_std(group[metric]) if metric in group.columns else ""
         rows.append(row)
@@ -180,7 +200,10 @@ def table_ablation(summary):
 
 
 def table_sensitivity(summary):
-    columns = ["Alpha", "Beta", "Test Acc", "Test NLL", "ECE", "Brier", "Gen Gap", "AULC", "Epochs Run"]
+    columns = [
+        "Alpha", "Beta", "Seeds", "Test Acc", "Test NLL", "ECE", "Brier",
+        "Gen Gap", "AULC", "Epochs Run",
+    ]
     metric_map = {
         "Test Acc": "test_acc",
         "Test NLL": "test_nll",
@@ -195,10 +218,15 @@ def table_sensitivity(summary):
 
     df = add_alpha_beta(summary)
     exp_type = df.get("experiment_type", pd.Series("", index=df.index)).astype(str)
-    df = df[(exp_type == "sensitivity") & (df.get("method", pd.Series("", index=df.index)) == "reliability")].copy()
+    method_col = df.get("method", pd.Series("", index=df.index))
+    df = df[(exp_type == "sensitivity") & method_col.isin(["reliability", "reliability_full"])].copy()
     rows = []
     for (alpha, beta), group in df.groupby(["controller_alpha", "controller_beta"], dropna=False):
-        row = {"Alpha": fmt_number(alpha, 2), "Beta": fmt_number(beta, 2)}
+        row = {
+            "Alpha": fmt_number(alpha, 2),
+            "Beta": fmt_number(beta, 2),
+            "Seeds": int(group["seed"].nunique()) if "seed" in group.columns else len(group),
+        }
         for label, metric in metric_map.items():
             row[label] = fmt_mean_std(group[metric]) if metric in group.columns else ""
         rows.append(row)
@@ -209,7 +237,9 @@ def table_sensitivity(summary):
 def table_statistical_tests(summary):
     columns = [
         "Dataset", "Model", "Metric", "Ours", "Best Baseline", "Best Baseline Name",
-        "Mean Difference", "Cohen d", "Paired t-test p", "Wilcoxon p", "Significance",
+        "Mean Difference", "Bootstrap 95% CI", "Cohen d", "N Pairs",
+        "Paired t-test p", "Paired t-test p Holm", "Wilcoxon p", "Wilcoxon p Holm",
+        "Significance",
     ]
     if summary.empty:
         return pd.DataFrame(columns=columns)
@@ -243,12 +273,24 @@ def table_statistical_tests(summary):
                 "Best Baseline": fmt_number(row["best_baseline"]),
                 "Best Baseline Name": method_label(row["best_baseline_name"]),
                 "Mean Difference": fmt_number(row["mean_difference"]),
+                "Bootstrap 95% CI": fmt_ci(row.get("ci95_low", np.nan), row.get("ci95_high", np.nan)),
                 "Cohen d": fmt_number(row["cohen_d"]),
-                "Paired t-test p": format_p_value(row["paired_ttest_p"]),
-                "Wilcoxon p": format_p_value(row["wilcoxon_p"]),
+                "N Pairs": int(row["n_pairs"]) if np.isfinite(row["n_pairs"]) else "",
+                "_paired_t_raw": row["paired_ttest_p"],
+                "_wilcoxon_raw": row["wilcoxon_p"],
                 "Significance": row["significance"],
             })
-    return pd.DataFrame(rows, columns=columns)
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return pd.DataFrame(columns=columns)
+
+    out["_paired_t_holm"] = holm_bonferroni(out["_paired_t_raw"])
+    out["_wilcoxon_holm"] = holm_bonferroni(out["_wilcoxon_raw"])
+    out["Paired t-test p"] = out["_paired_t_raw"].map(format_p_value)
+    out["Paired t-test p Holm"] = out["_paired_t_holm"].map(format_p_value)
+    out["Wilcoxon p"] = out["_wilcoxon_raw"].map(format_p_value)
+    out["Wilcoxon p Holm"] = out["_wilcoxon_holm"].map(format_p_value)
+    return out[columns]
 
 
 def main():

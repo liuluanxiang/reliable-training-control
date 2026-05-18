@@ -28,3 +28,10 @@ fi
 if [ -f make_statistical_figures.py ]; then
   python make_statistical_figures.py --results-dir "$RESULTS_DIR" --out-dir "statistical_figures/${RUN_TAG}"
 fi
+
+python audit_experiment_results.py \
+  --results-dir "$RESULTS_DIR" \
+  --suite sensitivity \
+  --check-statistical \
+  --statistical-tables-dir "statistical_tables/${RUN_TAG}" \
+  --statistical-figures-dir "statistical_figures/${RUN_TAG}"

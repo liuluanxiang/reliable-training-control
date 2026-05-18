@@ -230,7 +230,7 @@ The pipeline also includes three optional analyses for Chapter 4.
    beta in {0.80, 0.90, 0.95}
 
 3. Statistical tests:
-   Ours vs best baseline using paired seeds. The statistical table reports paired t-test, Wilcoxon test, Cohen's d, and significance markers.
+   Ours vs best baseline using paired seeds. The statistical table reports bootstrap 95% CI, paired t-test, Wilcoxon test, Holm-corrected p-values, Cohen's d, pair counts, and significance markers.
 
 Usage:
 
@@ -240,6 +240,12 @@ bash run_sensitivity.sh
 python generate_statistical_tables.py --results-dir results --out-dir statistical_tables
 python make_statistical_figures.py --results-dir results --out-dir statistical_figures
 ```
+
+The statistical figure script writes:
+
+- `fig_4_11_ablation_study.pdf/png`
+- `fig_4_12_sensitivity_analysis.pdf/png`
+- `fig_4_13_statistical_tests.pdf/png`
 
 ## Outputs
 
