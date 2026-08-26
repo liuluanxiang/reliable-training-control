@@ -1,3 +1,5 @@
+"""论文图形的共享配色、版式、标注与导出规范。"""
+
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
@@ -10,6 +12,11 @@ PALETTE = {
     "reliability_full": "#B0004F",
     "reliability_pb_only": "#D66BA0",
     "reliability_pd_only": "#8B5FBF",
+    "reliability_pd_full": "#B0004F",
+    "reliability_pd_v_only": "#4B9CD3",
+    "reliability_pd_v_h": "#5C8F6B",
+    "reliability_pd_v_u": "#C9A227",
+    "reliability_pd_h_u": "#8B5FBF",
     "reliability_no_smoothing": "#E07A5F",
     "reliability_no_ema": "#E07A5F",
     "reliability_val_loss_only": "#4B9CD3",
@@ -29,6 +36,11 @@ LABELS = {
     "reliability_full": "Ours",
     "reliability_pb_only": "PB-only",
     "reliability_pd_only": "PD-only",
+    "reliability_pd_full": "Full (V+H+U)",
+    "reliability_pd_v_only": "V only",
+    "reliability_pd_v_h": "V+H",
+    "reliability_pd_v_u": "V+U",
+    "reliability_pd_h_u": "H+U",
     "reliability_no_smoothing": "No smoothing",
     "reliability_no_ema": "No smoothing",
     "reliability_val_loss_only": "Val-loss only",
@@ -43,6 +55,11 @@ METHOD_LABELS = {
     "reliability_full": "Ours",
     "reliability_pb_only": "PB-only",
     "reliability_pd_only": "PD-only",
+    "reliability_pd_full": "Full (V+H+U)",
+    "reliability_pd_v_only": "V only",
+    "reliability_pd_v_h": "V+H",
+    "reliability_pd_v_u": "V+U",
+    "reliability_pd_h_u": "H+U",
     "reliability_no_smoothing": "No smoothing",
     "reliability_no_ema": "No smoothing",
     "reliability_val_loss_only": "Val-loss only",
@@ -53,10 +70,14 @@ METHOD_ORDER = [
     "step", "cosine", "plateau", "reliability", "reliability_full",
     "reliability_pb_only", "reliability_pd_only", "reliability_no_smoothing",
     "reliability_no_ema", "reliability_val_loss_only", "reliability_monitor_only",
+    "reliability_pd_full", "reliability_pd_v_only", "reliability_pd_v_h",
+    "reliability_pd_v_u", "reliability_pd_h_u",
 ]
 
 
 def set_nature_style():
+    """应用面向论文双栏排版的 Matplotlib 全局参数。"""
+
     mpl.rcParams.update({
         "font.family": "DejaVu Sans",
         "font.size": 8,
@@ -82,10 +103,14 @@ def set_nature_style():
 
 
 def panel_label(ax, label):
+    """在坐标轴左上角添加面板字母。"""
+
     add_panel_label(ax, label)
 
 
 def add_panel_label(ax, label, x=-0.12, y=1.13):
+    """以可调位置添加面板标签。"""
+
     ax.text(
         x, y, label, transform=ax.transAxes, fontsize=11, fontweight="bold",
         va="top", ha="left", clip_on=False,
@@ -93,6 +118,8 @@ def add_panel_label(ax, label, x=-0.12, y=1.13):
 
 
 def _ordered_legend(handles, labels):
+    """按论文约定的方法顺序整理图例项目。"""
+
     order = {METHOD_LABELS.get(k, k): i for i, k in enumerate(METHOD_ORDER)}
     pairs = []
     seen = set()
@@ -106,6 +133,8 @@ def _ordered_legend(handles, labels):
 
 
 def place_legend_safely(ax, preferred="best", outside_if_needed=True, ncol=1, fontsize=6.5):
+    """选择低遮挡图例位置，必要时把图例移到坐标轴外。"""
+
     handles, labels = ax.get_legend_handles_labels()
     handles, labels = _ordered_legend(handles, labels)
     if not handles:
@@ -126,6 +155,8 @@ def place_legend_safely(ax, preferred="best", outside_if_needed=True, ncol=1, fo
 
 
 def _axes_points(ax):
+    """提取坐标轴内已有线、散点和柱形的显示坐标。"""
+
     points = []
     to_axes = ax.transAxes.inverted()
     for line in ax.lines:
@@ -146,6 +177,8 @@ def _axes_points(ax):
 
 
 def _least_crowded_annotation_loc(ax):
+    """根据已有图元密度选择统计标注角落。"""
+
     points = [(float(x), float(y)) for x, y in _axes_points(ax) if 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0]
     if not points:
         return "top-right"
@@ -164,6 +197,8 @@ def _least_crowded_annotation_loc(ax):
 
 
 def add_stat_annotation(ax, text, loc="top-right", pad=0.035, fontsize=6.5):
+    """添加带背景的统计文本，并支持自动低密度位置。"""
+
     if not text:
         return None
     if loc == "auto":
@@ -185,6 +220,8 @@ def add_stat_annotation(ax, text, loc="top-right", pad=0.035, fontsize=6.5):
 
 
 def draw_schematic_box(ax, xy, width, height, text, edgecolor=None, facecolor="#F8F8F8", fontsize=8):
+    """绘制算法流程示意图中的统一节点框。"""
+
     x, y = xy
     edgecolor = edgecolor or PALETTE["midgray"]
     box = FancyBboxPatch(
@@ -202,6 +239,8 @@ def draw_schematic_box(ax, xy, width, height, text, edgecolor=None, facecolor="#
 
 
 def draw_arrow_between_boxes(ax, start_box, end_box, y_offset=0.0):
+    """在两个流程节点的边界之间绘制箭头。"""
+
     sx = start_box.get_x() + start_box.get_width() + 0.012
     sy = start_box.get_y() + start_box.get_height() / 2 + y_offset
     ex = end_box.get_x() - 0.012
@@ -216,6 +255,8 @@ def draw_arrow_between_boxes(ax, start_box, end_box, y_offset=0.0):
 
 
 def draw_schematic_sequence(ax, title, nodes, highlight_last=True):
+    """绘制水平算法步骤序列，并可突出最终控制动作。"""
+
     ax.set_axis_off()
     ax.set_title(title, loc="left", pad=12)
     n = len(nodes)
@@ -241,6 +282,8 @@ def draw_schematic_sequence(ax, title, nodes, highlight_last=True):
 
 
 def finalize_figure_layout(fig, out_base):
+    """完成布局并导出 PDF 与高分辨率 PNG。"""
+
     try:
         fig.set_constrained_layout_pads(w_pad=0.035, h_pad=0.045, wspace=0.10, hspace=0.12)
     except Exception:
@@ -251,4 +294,6 @@ def finalize_figure_layout(fig, out_base):
 
 
 def save_figure(fig, out_base):
+    """统一保存并关闭案例研究图，避免批量绘图占用内存。"""
+
     finalize_figure_layout(fig, out_base)

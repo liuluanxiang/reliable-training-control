@@ -205,14 +205,28 @@ __marimo__/
 # Experiment artifacts
 data/
 results/
+results_v2/
+# Per-run configs are generated lazily by the active revision queue.
+revision_experiments/configs/_scheduled/
+# Live queue snapshots are regenerated after every completed physical run.
+revision_experiments/REVISION_STATUS.md
+revision_experiments/RUNTIME_ESTIMATE.md
+outputs/
+*.rar
 figures/
+figures_v2/
+figures_revised_ch4/
 tables/
+tables_v2/
 figures_conclusion/
 tables_conclusion/
 statistical_figures/
+statistical_figures_v2/
 statistical_tables/
+statistical_tables_v2/
 figures_check/
 tables_check/
 figures_conclusion_check/
 tables_conclusion_check/
 chapter4_tables/
+Case */

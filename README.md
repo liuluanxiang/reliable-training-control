@@ -2,18 +2,20 @@
 
 Chapter 4 experiment code for reliability-aware training-time control in non-convex deep learning.
 
-The project studies training-time decisions based on PAC-Bayes generalization signals and primal-dual optimality indicators. It includes experiment execution, reliability metrics, case-study tables, and Nature-style figures.
+The project studies training-time decisions based on PAC-Bayes generalization signals and primal-dual optimality indicators. It keeps the core experiment runner, batch runner, main case-study postprocessing, ablation and sensitivity suites, and paired statistical tests.
 
 ## Layout
 
 ```text
 .
 +-- configs/                 # Experiment configurations
-+-- scripts/                 # Table and figure generation scripts
++-- scripts/                 # Main case-study table and figure scripts
 +-- src/                     # Data, models, metrics, controller, and signal code
++-- generate_statistical_tables.py
++-- make_statistical_figures.py
++-- audit_experiment_results.py
 +-- requirements.txt         # Python dependencies
-+-- run_all_main.sh          # Recommended batch run
-+-- run_supplementary_cifar100.sh  # CIFAR-100 supplementary architecture run
++-- run_batch.py             # Cross-platform batch runner
 +-- run_experiment.py        # Main experiment entry point
 +-- README.md
 `-- LICENSE
@@ -129,8 +131,8 @@ is appended to experiment names and used in output directories:
 results/main_supplement_20260501_120000/
 tables/main_supplement_20260501_120000/
 figures/main_supplement_20260501_120000/
-tables_conclusion/main_supplement_20260501_120000/
-figures_conclusion/main_supplement_20260501_120000/
+statistical_tables/main_supplement_20260501_120000/
+statistical_figures/main_supplement_20260501_120000/
 ```
 
 This keeps main, supplementary, ablation, sensitivity, table, figure, and CSV artifacts from overwriting or being skipped because of previous runs.
@@ -138,15 +140,8 @@ This keeps main, supplementary, ablation, sensitivity, table, figure, and CSV ar
 After the quick run, generate tables and figures:
 
 ```powershell
-.\.venv\Scripts\python.exe generate_case_study_tables.py --results-dir results --out-dir tables
-.\.venv\Scripts\python.exe make_case_study_figures.py --results-dir results --out-dir figures
-```
-
-Conclusion-style figures and tables can also be regenerated with:
-
-```powershell
-.\.venv\Scripts\python.exe generate_conclusion_tables.py --results-dir results --out-dir tables_conclusion
-.\.venv\Scripts\python.exe make_conclusion_figures.py --results-dir results --out-dir figures_conclusion
+.\.venv\Scripts\python.exe scripts\generate_case_study_tables.py --results-dir results --out-dir tables
+.\.venv\Scripts\python.exe scripts\make_case_study_figures.py --results-dir results --out-dir figures
 ```
 
 By default, table and figure scripts exclude quick-test runs. Pass `--include-quick` if a diagnostic output should include them.
@@ -197,10 +192,10 @@ with compact prefixes for supplementary and sensitivity experiments:
 
 ## Recommended Main Run
 
-On a shell with `bash` available:
+Run the full main and supplementary batch:
 
-```bash
-bash run_all_main.sh
+```powershell
+.\.venv\Scripts\python.exe run_batch.py main
 ```
 
 This runs:
@@ -214,8 +209,8 @@ This runs:
 
 To run only the new CIFAR-100 supplementary architecture experiments:
 
-```bash
-bash run_supplementary_cifar100.sh
+```powershell
+.\.venv\Scripts\python.exe run_batch.py supplementary-cifar100
 ```
 
 ## Additional Analyses
@@ -234,11 +229,11 @@ The pipeline also includes three optional analyses for Chapter 4.
 
 Usage:
 
-```bash
-bash run_ablation.sh
-bash run_sensitivity.sh
-python generate_statistical_tables.py --results-dir results --out-dir statistical_tables
-python make_statistical_figures.py --results-dir results --out-dir statistical_figures
+```powershell
+.\.venv\Scripts\python.exe run_batch.py ablation
+.\.venv\Scripts\python.exe run_batch.py sensitivity
+.\.venv\Scripts\python.exe generate_statistical_tables.py --results-dir results --out-dir statistical_tables
+.\.venv\Scripts\python.exe make_statistical_figures.py --results-dir results --out-dir statistical_figures
 ```
 
 The statistical figure script writes:
@@ -257,5 +252,43 @@ Runtime artifacts are ignored by Git:
 - `figures/`
 - `statistical_tables/`
 - `statistical_figures/`
+- `outputs/`
+- `*.rar`
 
 These outputs can be regenerated from the experiment configs and scripts.
+
+## Paper 1 Major Revision Workflow
+
+The corrected revision protocol is isolated under `revision_experiments/`. Historical results use
+the legacy augmented-validation protocol and are not reused for revision inference.
+Formal protocol-v2 per-run artifacts are stored with the existing experiment archive under
+`results_v2/<experiment>/<method>/seed_<n>/`. The `revision_experiments/results/` directory is
+reserved for queue manifests, live state, logs, runtime estimates, smoke runs, and aggregated
+revision analysis outputs.
+
+```powershell
+# Download/check Tiny ImageNet and the official DeiT-Tiny checkpoint.
+.\revision_experiments\scripts\download_external_assets.ps1
+
+# Regenerate the audit, versioned configs, and exact missing-run matrix.
+.\.venv\Scripts\python.exe .\revision_experiments\scripts\audit_repository.py
+.\.venv\Scripts\python.exe -m unittest tests.test_revision_protocol -v
+
+# Benchmark all compute families and calculate the conservative completion estimate.
+.\.venv\Scripts\python.exe .\revision_experiments\scripts\benchmark_runtime.py
+.\.venv\Scripts\python.exe .\revision_experiments\scripts\estimate_runtime.py
+
+# Inspect the 260-run physical queue without launching it.
+.\.venv\Scripts\python.exe .\revision_experiments\scripts\run_revision.py
+
+# Run the two five-method, one-seed smoke configurations before the full queue.
+.\.venv\Scripts\python.exe .\run_experiment.py --config .\revision_experiments\configs\tiny_imagenet\smoke.json --existing rerun-partial
+.\.venv\Scripts\python.exe .\run_experiment.py --config .\revision_experiments\configs\deit_cifar100\smoke.json --existing rerun-partial
+
+# After smoke review, launch sequential corrected-protocol runs and generate analysis outputs.
+.\.venv\Scripts\python.exe .\revision_experiments\scripts\run_revision.py --execute
+.\.venv\Scripts\python.exe .\revision_experiments\scripts\analyze_revision.py
+```
+
+`revision_experiments/results/run_manifest.csv` is rewritten after every run and records completion/failure status. Completed
+outputs are skipped only when their scientific configuration hash matches the requested run.

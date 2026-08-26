@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Experiment Progress</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f4f6f8;
+      --panel: #ffffff;
+      --ink: #16202a;
+      --muted: #627083;
+      --line: #d7dee8;
+      --accent: #0f766e;
+      --accent-2: #2563eb;
+      --warn: #b45309;
+      --bad: #b91c1c;
+      --good: #047857;
+      --chip: #eef2f7;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101418;
+        --panel: #1a2027;
+        --ink: #eef2f7;
+        --muted: #a8b3c2;
+        --line: #334155;
+        --accent: #2dd4bf;
+        --accent-2: #60a5fa;
+        --warn: #f59e0b;
+        --bad: #f87171;
+        --good: #34d399;
+        --chip: #243040;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      padding: 14px 24px;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    h1 {
+      font-size: 19px;
+      margin: 0 0 5px;
+      font-weight: 700;
+    }
+    main { padding: 18px 24px 32px; max-width: 1680px; margin: 0 auto; }
+    code { font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; }
+    .muted { color: var(--muted); }
+    .topline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 2px 9px;
+      color: var(--muted);
+      background: var(--chip);
+      font-size: 12px;
+    }
+    .grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 13px;
+      min-width: 0;
+    }
+    .notice {
+      display: none;
+      border: 1px solid color-mix(in srgb, var(--good) 45%, var(--line));
+      border-left: 5px solid var(--good);
+      background: color-mix(in srgb, var(--good) 8%, var(--panel));
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 14px;
+    }
+    .notice.warn {
+      border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+      border-left-color: var(--warn);
+      background: color-mix(in srgb, var(--warn) 8%, var(--panel));
+    }
+    .notice.bad {
+      border-color: color-mix(in srgb, var(--bad) 45%, var(--line));
+      border-left-color: var(--bad);
+      background: color-mix(in srgb, var(--bad) 8%, var(--panel));
+    }
+    .notice-title { font-weight: 800; margin-bottom: 3px; }
+    .notice-body { color: var(--ink); }
+    .notice-time { color: var(--muted); font-size: 12px; margin-top: 5px; }
+    .span2 { grid-column: span 2; }
+    .span3 { grid-column: span 3; }
+    .full { grid-column: 1 / -1; }
+    .label { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+    .value { font-size: 21px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0; }
+    .subvalue { margin-top: 4px; color: var(--muted); font-size: 12px; min-height: 17px; }
+    .bar {
+      height: 11px;
+      background: color-mix(in srgb, var(--line) 72%, transparent);
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    .fill { height: 100%; width: 0; background: var(--accent); transition: width .25s ease; }
+    .fill.blue { background: var(--accent-2); }
+    .status-run { color: var(--accent); font-weight: 700; }
+    .status-done { color: var(--good); font-weight: 700; }
+    .status-skip { color: var(--warn); font-weight: 700; }
+    .status-error { color: var(--bad); font-weight: 700; }
+    .status-wait { color: var(--muted); font-weight: 700; }
+    .metric-table {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      background: color-mix(in srgb, var(--panel) 86%, var(--bg));
+      min-width: 0;
+    }
+    .metric .value { font-size: 18px; }
+    .run-board {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .run-card {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--muted);
+      border-radius: 8px;
+      padding: 8px 9px;
+      background: color-mix(in srgb, var(--panel) 88%, var(--bg));
+      min-height: 72px;
+    }
+    .run-card.current { border-left-color: var(--accent-2); box-shadow: inset 0 0 0 1px var(--accent-2); }
+    .run-card.done { border-left-color: var(--good); }
+    .run-card.skip { border-left-color: var(--warn); }
+    .run-card.error { border-left-color: var(--bad); }
+    .run-card.pending { border-left-color: var(--muted); }
+    .run-title { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; }
+    .run-meta { margin-top: 5px; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .stage-board {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .stage-card {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--muted);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 11px 12px;
+      min-height: 94px;
+    }
+    .stage-card.running { border-left-color: var(--accent-2); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-2) 30%, transparent); }
+    .stage-card.completed { border-left-color: var(--good); }
+    .stage-card.error { border-left-color: var(--bad); }
+    .stage-title { display: flex; justify-content: space-between; gap: 8px; font-weight: 800; }
+    .stage-status { font-size: 12px; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+    .stage-card.running .stage-status { color: var(--accent-2); }
+    .stage-card.completed .stage-status { color: var(--good); }
+    .stage-card.error .stage-status { color: var(--bad); }
+    .stage-message { margin-top: 8px; color: var(--muted); font-size: 12px; min-height: 34px; }
+    .stage-time { color: var(--muted); font-size: 11px; }
+    .charts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .chart-wrap { min-height: 230px; }
+    .chart-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 8px; }
+    .chart-title { font-weight: 700; }
+    .chart-note { color: var(--muted); font-size: 12px; }
+    svg.chart {
+      width: 100%;
+      height: 170px;
+      display: block;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--panel) 84%, var(--bg));
+    }
+    .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+    .legend-item::before {
+      content: "";
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 5px;
+      background: currentColor;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-size: 12px; font-weight: 600; }
+    .table-scroll { max-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+    .messages {
+      max-height: 390px;
+      overflow: auto;
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 12px;
+      background: color-mix(in srgb, var(--panel) 80%, var(--bg));
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+    }
+    @media (max-width: 1180px) {
+      .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .span2, .span3 { grid-column: span 3; }
+      .charts { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 720px) {
+      main { padding: 14px; }
+      header { padding: 12px 14px; }
+      .grid { grid-template-columns: 1fr; }
+      .span2, .span3 { grid-column: 1 / -1; }
+      .stage-board { grid-template-columns: 1fr; }
+      .metric-table { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .value { font-size: 19px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="topline">
+      <h1>Experiment Progress</h1>
+      <span class="pill" id="refreshPill">refreshing every 2s</span>
+      <span class="pill" id="stalePill">last update -</span>
+    </div>
+    <div class="muted" id="subtitle">Waiting for progress_state.json</div>
+  </header>
+  <main>
+    <div class="notice" id="mainNotice">
+      <div class="notice-title" id="mainNoticeTitle"></div>
+      <div class="notice-body" id="mainNoticeBody"></div>
+      <div class="notice-time" id="mainNoticeTime"></div>
+    </div>
+    <div class="stage-board" id="stageBoard"></div>
+    <section class="grid">
+      <div class="panel"><div class="label">Status</div><div class="value" id="status">-</div><div class="subvalue" id="statusNote"></div></div>
+      <div class="panel"><div class="label">Run</div><div class="value" id="run">-</div><div class="bar"><div class="fill" id="runBar"></div></div><div class="subvalue" id="runNote"></div></div>
+      <div class="panel"><div class="label">Epoch</div><div class="value" id="epoch">-</div><div class="bar"><div class="fill blue" id="epochBar"></div></div><div class="subvalue" id="epochNote"></div></div>
+      <div class="panel"><div class="label">Batch</div><div class="value" id="batch">-</div><div class="bar"><div class="fill" id="batchBar"></div></div><div class="subvalue" id="batchNote"></div></div>
+      <div class="panel"><div class="label">ETA Current Run</div><div class="value" id="etaRun">-</div><div class="subvalue" id="timeNote"></div></div>
+      <div class="panel"><div class="label">Best Validation</div><div class="value" id="bestVal">-</div><div class="subvalue" id="bestNote"></div></div>
+
+      <div class="panel span3">
+        <div class="label">Current Run</div>
+        <div class="value" id="current">-</div>
+        <div class="subvalue" id="currentDetail"></div>
+      </div>
+      <div class="panel span3">
+        <div class="label">Latest Metrics</div>
+        <div class="metric-table">
+          <div class="metric"><div class="label">Train Loss</div><div class="value" id="trainLoss">-</div></div>
+          <div class="metric"><div class="label">Train Acc</div><div class="value" id="trainAcc">-</div></div>
+          <div class="metric"><div class="label">Val Acc</div><div class="value" id="valAcc">-</div></div>
+          <div class="metric"><div class="label">Val NLL</div><div class="value" id="valNll">-</div></div>
+          <div class="metric"><div class="label">Eval Acc</div><div class="value" id="evalAcc">-</div></div>
+          <div class="metric"><div class="label">Eval NLL</div><div class="value" id="evalNll">-</div></div>
+          <div class="metric"><div class="label">Reliability</div><div class="value" id="rbar">-</div></div>
+          <div class="metric"><div class="label">LR</div><div class="value" id="lr">-</div></div>
+        </div>
+      </div>
+
+      <div class="panel full">
+        <div class="chart-head">
+          <div>
+            <div class="label">Run Queue</div>
+            <div class="chart-title">Completed, Skipped, Current, Pending</div>
+          </div>
+          <div class="chart-note" id="queueSummary">-</div>
+        </div>
+        <div id="runBoard" class="run-board"></div>
+      </div>
+
+      <div class="panel full">
+        <div class="charts">
+          <div class="chart-wrap">
+            <div class="chart-head"><div class="chart-title">Accuracy</div><div class="chart-note" id="accChartNote">-</div></div>
+            <svg class="chart" id="accChart" viewBox="0 0 640 170" preserveAspectRatio="none"></svg>
+            <div class="legend"><span class="legend-item" style="color: var(--accent-2)">val_acc</span><span class="legend-item" style="color: var(--good)">train_acc</span><span class="legend-item" style="color: var(--accent)">eval_acc</span></div>
+          </div>
+          <div class="chart-wrap">
+            <div class="chart-head"><div class="chart-title">Loss, NLL, Reliability</div><div class="chart-note" id="lossChartNote">-</div></div>
+            <svg class="chart" id="lossChart" viewBox="0 0 640 170" preserveAspectRatio="none"></svg>
+            <div class="legend"><span class="legend-item" style="color: var(--warn)">train_loss</span><span class="legend-item" style="color: var(--bad)">val_nll</span><span class="legend-item" style="color: var(--muted)">rbar</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel span3">
+        <div class="label">Planned Runs and Artifacts</div>
+        <div id="plan" class="table-scroll"></div>
+      </div>
+      <div class="panel span3">
+        <div class="label">Recent Messages</div>
+        <div class="messages" id="messages"></div>
+      </div>
+    </section>
+  </main>
+  <script>
+    const stateUrl = "__STATE_URL__";
+    const fmt = (v) => (v === undefined || v === null || v === "" ? "-" : v);
+    const pct = (a, b) => b ? Math.max(0, Math.min(100, 100 * a / b)) : 0;
+    const nf = new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 });
+    const pf = new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 2 });
+
+    function setText(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = fmt(value);
+    }
+    function setBar(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.style.width = value.toFixed(1) + "%";
+    }
+    function statusClass(status) {
+      status = String(status || "");
+      if (status === "completed" || status.includes("done") || status.includes("completed")) return "status-done";
+      if (status.includes("error") || status.includes("failed")) return "status-error";
+      if (status.includes("skip") || status.includes("archive") || status.includes("overwrite")) return "status-skip";
+      if (status.includes("will") || status.includes("pending")) return "status-wait";
+      return "status-run";
+    }
+    function runCardClass(run, current) {
+      if (current && run.run_index === current.run_index) return "run-card current";
+      const status = String(run.status || "");
+      if (status.includes("completed") || status.includes("done")) return "run-card done";
+      if (status.includes("skip")) return "run-card skip";
+      if (status.includes("error")) return "run-card error";
+      return "run-card pending";
+    }
+    function inferStages(data) {
+      const defaults = {
+        main: { label: "Main experiments", status: "pending", message: "76 main and supplementary runs" },
+        ablation: { label: "Ablation test", status: "pending", message: "Full/PB-only/PD-only/no-smoothing/val-loss-only" },
+        sensitivity: { label: "Hyperparameter sensitivity", status: "pending", message: "alpha-beta grid over reliability control" },
+        statistical: { label: "Statistical postprocess", status: "pending", message: "tables, figures, paired tests, audit" }
+      };
+      const stages = { ...defaults, ...((data.pipeline && data.pipeline.stages) || {}) };
+      const type = String(data.experiment_type || "");
+      if (!data.pipeline) {
+        if (["main", "supplement"].includes(type)) stages.main.status = data.status || "running";
+        if (type === "ablation") {
+          stages.main.status = "completed";
+          stages.ablation.status = data.status || "running";
+        }
+        if (type === "sensitivity") {
+          stages.main.status = "completed";
+          stages.ablation.status = "completed";
+          stages.sensitivity.status = data.status || "running";
+        }
+      }
+      return ["main", "ablation", "sensitivity", "statistical"].map(k => ({ key: k, ...stages[k] }));
+    }
+    function renderStages(data) {
+      const board = document.getElementById("stageBoard");
+      if (!board) return;
+      board.innerHTML = inferStages(data).map(stage => {
+        const status = String(stage.status || "pending");
+        const cls = ["stage-card", status].join(" ");
+        return `<div class="${cls}"><div class="stage-title"><span>${stage.label}</span><span class="stage-status">${status}</span></div><div class="stage-message">${stage.message || "-"}</div><div class="stage-time">${stage.updated_at ? "updated " + stage.updated_at : ""}</div></div>`;
+      }).join("");
+    }
+    function compactNumber(v, asPercent=false) {
+      if (v === undefined || v === null || Number.isNaN(Number(v))) return "-";
+      const n = Number(v);
+      return asPercent ? pf.format(n) : nf.format(n);
+    }
+    function secondsAgo(text) {
+      if (!text) return null;
+      const parsed = Date.parse(text.replace(" ", "T"));
+      if (!Number.isFinite(parsed)) return null;
+      return Math.max(0, Math.round((Date.now() - parsed) / 1000));
+    }
+    function ageText(seconds) {
+      if (seconds === null) return "-";
+      if (seconds < 60) return seconds + "s ago";
+      const mins = Math.floor(seconds / 60);
+      if (mins < 60) return mins + "m ago";
+      return Math.floor(mins / 60) + "h" + String(mins % 60).padStart(2, "0") + "m ago";
+    }
+    function parseHistory(messages) {
+      const points = [];
+      for (const line of messages || []) {
+        const epochMatch = line.match(/epoch=(\d+)\/(\d+)/);
+        if (!epochMatch) continue;
+        const point = { epoch: Number(epochMatch[1]), total: Number(epochMatch[2]) };
+        const pairs = [
+          ["train_loss", /loss=([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/i],
+          ["train_acc", /train batch=.*?acc=([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/i],
+          ["eval_nll", /eval batch=.*?nll=([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/i],
+          ["eval_acc", /eval batch=.*?acc=([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/i],
+          ["val_acc", /val_acc=([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/i],
+          ["val_nll", /val_nll=([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/i],
+          ["rbar", /rbar=([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/i]
+        ];
+        let found = false;
+        for (const [key, regex] of pairs) {
+          const m = line.match(regex);
+          if (m) {
+            point[key] = Number(m[1]);
+            found = true;
+          }
+        }
+        if (found) points.push(point);
+      }
+      return points.slice(-90);
+    }
+    function makeSeries(points, key) {
+      const byEpoch = new Map();
+      for (const p of points) {
+        if (p[key] !== undefined && Number.isFinite(p[key])) byEpoch.set(p.epoch, p[key]);
+      }
+      return [...byEpoch.entries()].map(([epoch, value]) => ({ x: epoch, y: value }));
+    }
+    function drawChart(id, seriesList, options = {}) {
+      const svg = document.getElementById(id);
+      if (!svg) return;
+      const width = 640, height = 170, pad = { l: 38, r: 14, t: 12, b: 24 };
+      const all = seriesList.flatMap(s => s.points);
+      if (!all.length) {
+        svg.innerHTML = `<text x="320" y="88" text-anchor="middle" fill="var(--muted)" font-size="13">waiting for metrics</text>`;
+        return;
+      }
+      const minX = Math.min(...all.map(p => p.x));
+      const maxX = Math.max(...all.map(p => p.x));
+      let minY = options.minY ?? Math.min(...all.map(p => p.y));
+      let maxY = options.maxY ?? Math.max(...all.map(p => p.y));
+      if (minY === maxY) { minY -= 1; maxY += 1; }
+      const x = v => pad.l + (maxX === minX ? 0.5 : (v - minX) / (maxX - minX)) * (width - pad.l - pad.r);
+      const y = v => pad.t + (1 - (v - minY) / (maxY - minY)) * (height - pad.t - pad.b);
+      const grid = [0, .25, .5, .75, 1].map(t => {
+        const gy = pad.t + t * (height - pad.t - pad.b);
+        const val = maxY - t * (maxY - minY);
+        return `<line x1="${pad.l}" y1="${gy}" x2="${width-pad.r}" y2="${gy}" stroke="var(--line)" stroke-width="1"/><text x="6" y="${gy+4}" fill="var(--muted)" font-size="11">${nf.format(val)}</text>`;
+      }).join("");
+      const paths = seriesList.map(s => {
+        if (!s.points.length) return "";
+        const d = s.points.map((p, i) => `${i ? "L" : "M"} ${x(p.x).toFixed(2)} ${y(p.y).toFixed(2)}`).join(" ");
+        const dots = s.points.slice(-1).map(p => `<circle cx="${x(p.x).toFixed(2)}" cy="${y(p.y).toFixed(2)}" r="3" fill="${s.color}"/>`).join("");
+        return `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.2" vector-effect="non-scaling-stroke"/>${dots}`;
+      }).join("");
+      svg.innerHTML = `${grid}<line x1="${pad.l}" y1="${height-pad.b}" x2="${width-pad.r}" y2="${height-pad.b}" stroke="var(--line)"/><text x="${pad.l}" y="${height-7}" fill="var(--muted)" font-size="11">epoch ${minX}</text><text x="${width-pad.r}" y="${height-7}" text-anchor="end" fill="var(--muted)" font-size="11">epoch ${maxX}</text>${paths}`;
+    }
+    function render(data) {
+      const current = data.current || {};
+      const runIndex = current.run_index || data.completed_runs || 0;
+      const totalRuns = data.total_runs || 0;
+      const messages = data.messages || [];
+      const history = parseHistory(messages);
+      const age = secondsAgo(data.updated_at);
+      const stale = age !== null && age > 180;
+      const notice = data.main_notice || null;
+      const noticeEl = document.getElementById("mainNotice");
+      if (notice && (notice.title || notice.message)) {
+        noticeEl.style.display = "block";
+        noticeEl.className = "notice " + (notice.level === "warning" ? "warn" : notice.level === "error" ? "bad" : "");
+        setText("mainNoticeTitle", notice.title || "Notice");
+        setText("mainNoticeBody", notice.message || "");
+        setText("mainNoticeTime", notice.updated_at ? `updated ${notice.updated_at}` : "");
+      } else {
+        noticeEl.style.display = "none";
+      }
+      renderStages(data);
+
+      setText("subtitle", `${data.experiment || "-"} | config=${data.config_path || "-"} | policy=${data.existing_policy || "-"}`);
+      setText("refreshPill", "refreshing every 2s");
+      setText("stalePill", `last update ${ageText(age)}`);
+      document.getElementById("stalePill").style.color = stale ? "var(--bad)" : "var(--muted)";
+      setText("status", data.status || "-");
+      document.getElementById("status").className = "value " + statusClass(data.status);
+      setText("statusNote", stale ? "state is stale; check process/logs" : `updated ${data.updated_at || "-"}`);
+      setText("run", `${runIndex}/${totalRuns}`);
+      setBar("runBar", pct(runIndex, totalRuns));
+      setText("runNote", `${data.completed_runs || 0} recorded finished/skipped in this config`);
+      setText("epoch", current.epoch && current.total_epochs ? `${current.epoch}/${current.total_epochs}` : "-");
+      setBar("epochBar", pct(current.epoch || 0, current.total_epochs || 0));
+      setText("epochNote", current.best_epoch ? `best epoch ${current.best_epoch}` : current.phase || "-");
+      setText("batch", current.batch && current.total_batches ? `${current.batch}/${current.total_batches}` : fmt(current.phase));
+      setBar("batchBar", pct(current.batch || 0, current.total_batches || 0));
+      setText("batchNote", current.batch_elapsed ? `batch elapsed ${current.batch_elapsed}` : "-");
+      setText("etaRun", current.eta_run || "-");
+      setText("timeNote", `epoch ${current.epoch_time || "-"} | avg ${current.avg_epoch_time || "-"}`);
+      setText("bestVal", current.best_val_acc !== undefined ? `${compactNumber(current.best_val_acc)} @ ${current.best_epoch || "-"}` : "-");
+      setText("bestNote", current.val_acc !== undefined ? `latest val ${compactNumber(current.val_acc)}` : "-");
+      setText("current", current.experiment ? `${current.method} | seed=${current.seed} | ${current.phase || "-"}` : "-");
+      setText("currentDetail", current.experiment || "-");
+      setText("trainLoss", compactNumber(current.train_loss));
+      setText("trainAcc", compactNumber(current.train_acc, true));
+      setText("valAcc", compactNumber(current.val_acc, true));
+      setText("valNll", compactNumber(current.val_nll));
+      setText("evalAcc", compactNumber(current.eval_acc, true));
+      setText("evalNll", compactNumber(current.eval_nll));
+      setText("rbar", compactNumber(current.rbar_final ?? current.rbar));
+      setText("lr", current.lr_before !== undefined ? `${compactNumber(current.lr_before)} -> ${compactNumber(current.lr_after)}` : "-");
+
+      const planned = data.planned_runs || [];
+      const finished = new Set((data.finished_runs || []).map(r => `${r.method}:${r.seed}`));
+      const counts = { done: 0, skipped: 0, current: 0, pending: 0, error: 0 };
+      document.getElementById("runBoard").innerHTML = planned.map(r => {
+        const key = `${r.method}:${r.seed}`;
+        const isCurrent = r.run_index === current.run_index;
+        let label = isCurrent ? "current" : (finished.has(key) ? "done" : r.status || "pending");
+        if (String(label).includes("skip")) counts.skipped += 1;
+        else if (String(label).includes("error")) counts.error += 1;
+        else if (isCurrent) counts.current += 1;
+        else if (finished.has(key) || String(label).includes("completed")) counts.done += 1;
+        else counts.pending += 1;
+        return `<div class="${runCardClass(r, current)}"><div class="run-title"><span>#${r.run_index} ${r.method}</span><span>${label}</span></div><div class="run-meta">seed ${r.seed}</div><div class="run-meta">${(r.artifacts || []).length ? "artifacts: " + r.artifacts.length : "no artifacts yet"}</div></div>`;
+      }).join("");
+      setText("queueSummary", `done ${counts.done} | skipped ${counts.skipped} | current ${counts.current} | pending ${counts.pending} | error ${counts.error}`);
+
+      const valAcc = makeSeries(history, "val_acc");
+      const trainAcc = makeSeries(history, "train_acc");
+      const evalAcc = makeSeries(history, "eval_acc");
+      drawChart("accChart", [
+        { points: valAcc, color: "var(--accent-2)" },
+        { points: trainAcc, color: "var(--good)" },
+        { points: evalAcc, color: "var(--accent)" }
+      ], { minY: 0, maxY: 1 });
+      setText("accChartNote", `${valAcc.length} val points`);
+      const trainLoss = makeSeries(history, "train_loss");
+      const valNll = makeSeries(history, "val_nll");
+      const rbar = makeSeries(history, "rbar");
+      drawChart("lossChart", [
+        { points: trainLoss, color: "var(--warn)" },
+        { points: valNll, color: "var(--bad)" },
+        { points: rbar, color: "var(--muted)" }
+      ]);
+      setText("lossChartNote", `${trainLoss.length} train points`);
+
+      document.getElementById("plan").innerHTML = `<table><thead><tr><th>#</th><th>Method</th><th>Seed</th><th>Status</th><th>Artifacts</th></tr></thead><tbody>${planned.map(r => `<tr><td>${r.run_index}</td><td>${r.method}</td><td>${r.seed}</td><td class="${statusClass(r.status)}">${r.status}</td><td>${(r.artifacts || []).join(", ") || "-"}</td></tr>`).join("")}</tbody></table>`;
+      document.getElementById("messages").textContent = messages.join("\n");
+    }
+    async function tick() {
+      try {
+        const response = await fetch(stateUrl + "?t=" + Date.now(), { cache: "no-store" });
+        render(await response.json());
+      } catch (err) {
+        setText("status", "waiting");
+        setText("subtitle", "Serve the results directory to enable live refresh: python -m http.server 8000 -d results");
+        setText("messages", String(err));
+      }
+    }
+    tick();
+    setInterval(tick, 2000);
+  </script>
+</body>
+</html>

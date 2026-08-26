@@ -1,0 +1,16 @@
+parameter,value,scope,where_defined,how_selected,tuned,notes
+alpha,0.5,global,configs/*.json; src/signals.py,historical equal weighting; selection record absent,unknown,No value invented.
+beta,0.9,global,configs/*.json; src/signals.py,historical default; 3x3 sensitivity exists,unknown,No value invented.
+gamma,0.5,global,configs/*.json; src/controller.py,historical controller setting,unknown,No value invented.
+delta,0.05,global,configs/*.json; src/signals.py,historical PB-inspired formula setting,unknown,No value invented.
+sigma,0.05,global,configs/*.json; src/signals.py,historical default; justification absent,unknown,No value invented.
+lambda_g,0.0001,global,configs/*.json; src/signals.py,historical scaling; justification absent,unknown,No value invented.
+lambda_u,0.001,global,configs/*.json; src/signals.py,historical scaling; justification absent,unknown,No value invented.
+min_lr,1e-05,global,configs/*.json; src/controller.py,historical controller setting,unknown,No value invented.
+lr_patience,8,global,configs/*.json; src/controller.py,historical controller setting,unknown,No value invented.
+stopping_patience,18,global,configs/*.json; src/controller.py,historical controller setting,unknown,No value invented.
+epsilon,0.0001,global,configs/*.json; src/controller.py,historical controller setting,unknown,No value invented.
+optimizer,sgd,global,configs/*.json,existing recipe,unknown,No value invented.
+initial_lr,0.1,global,configs/*.json,existing recipe,unknown,No value invented.
+weight_decay,0.0005,global,configs/*.json,existing recipe,unknown,No value invented.
+batch_size,128,global,configs/*.json,existing recipe,unknown,No value invented.

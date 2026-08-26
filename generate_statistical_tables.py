@@ -1,3 +1,5 @@
+"""从多种子实验摘要生成消融、敏感性与显著性检验表格。"""
+
 import argparse
 import json
 import re
@@ -31,6 +33,11 @@ METHOD_LABELS = {
     "reliability_full": "Ours / Full",
     "reliability_pb_only": "PB-only",
     "reliability_pd_only": "PD-only",
+    "reliability_pd_full": "Full (V+H+U)",
+    "reliability_pd_v_only": "V only",
+    "reliability_pd_v_h": "V+H",
+    "reliability_pd_v_u": "V+U",
+    "reliability_pd_h_u": "H+U",
     "reliability_no_smoothing": "No smoothing",
     "reliability_no_ema": "No smoothing",
     "reliability_val_loss_only": "Val-loss only",
@@ -46,10 +53,17 @@ ABLATION_METHODS = [
     "reliability_no_ema",
     "reliability_val_loss_only",
     "reliability_monitor_only",
+    "reliability_pd_full",
+    "reliability_pd_v_only",
+    "reliability_pd_v_h",
+    "reliability_pd_v_u",
+    "reliability_pd_h_u",
 ]
 
 
 def collect_summaries(results_dir):
+    """读取主汇总表，或从逐运行摘要容错重建。"""
+
     results_dir = Path(results_dir)
     master = results_dir / "master_summary.csv"
     if master.exists():
@@ -59,7 +73,9 @@ def collect_summaries(results_dir):
             pass
 
     rows = []
-    for path in results_dir.glob("*/*/seed_*/summary.json"):
+    for path in results_dir.rglob("summary.json"):
+        if any(part in {"_archive", "smoke"} for part in path.parts):
+            continue
         try:
             row = json.loads(path.read_text(encoding="utf-8"))
             row.setdefault("experiment", path.parts[-4])
@@ -72,22 +88,30 @@ def collect_summaries(results_dir):
 
 
 def method_label(method):
+    """将内部方法标识转换为论文表格标签。"""
+
     return METHOD_LABELS.get(str(method), str(method))
 
 
 def metric_higher(metric):
+    """返回指标是否按数值越高越好选择粗体最佳值。"""
+
     if metric in LOWER_BETTER:
         return False
     return True
 
 
 def fmt_number(value, digits=4):
+    """格式化单个有限数值，缺失值显示为占位符。"""
+
     if value is None or not np.isfinite(value):
         return ""
     return f"{float(value):.{digits}f}"
 
 
 def fmt_mean_std(values, digits=4):
+    """格式化重复种子的均值与样本标准差。"""
+
     mean, std = mean_std(values)
     if not np.isfinite(mean):
         return ""
@@ -95,12 +119,16 @@ def fmt_mean_std(values, digits=4):
 
 
 def fmt_ci(lo, hi, digits=4):
+    """格式化双侧置信区间。"""
+
     if not np.isfinite(lo) or not np.isfinite(hi):
         return ""
     return f"[{lo:.{digits}f}, {hi:.{digits}f}]"
 
 
 def parse_sensitivity_experiment(name):
+    """从敏感性实验名称解析 alpha 与 beta。"""
+
     match = re.search(r"alpha(\d{3})_beta(\d{3})", str(name))
     if not match:
         return np.nan, np.nan
@@ -110,6 +138,8 @@ def parse_sensitivity_experiment(name):
 
 
 def add_alpha_beta(summary):
+    """为敏感性结果补充可分组的 alpha/beta 数值列。"""
+
     if summary.empty:
         return summary
     out = summary.copy()
@@ -128,6 +158,8 @@ def add_alpha_beta(summary):
 
 
 def best_indices(df, metric_cols):
+    """为每个指标定位按优化方向最优的表格行。"""
+
     best = {}
     for col in metric_cols:
         vals = df[col].astype(str).str.extract(r"([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)", expand=False)
@@ -140,6 +172,8 @@ def best_indices(df, metric_cols):
 
 
 def markdown_table(df, path, best_map=None, note=None):
+    """将 DataFrame 输出为带可选最佳值加粗和说明的 Markdown 表。"""
+
     md = df.copy().astype(object)
     if best_map:
         for col, idx in best_map.items():
@@ -147,6 +181,8 @@ def markdown_table(df, path, best_map=None, note=None):
                 md.loc[idx, col] = f"**{md.loc[idx, col]}**"
 
     def esc(value):
+        """转义 Markdown 单元格中的竖线并统一缺失值。"""
+
         text = "" if pd.isna(value) else str(value)
         return text.replace("|", "\\|")
 
@@ -162,6 +198,8 @@ def markdown_table(df, path, best_map=None, note=None):
 
 
 def table_ablation(summary):
+    """汇总核心组件消融的均值、标准差与置信区间。"""
+
     columns = [
         "Dataset", "Model", "Method", "Seeds", "Test Acc", "Test Top-5 Acc",
         "Test NLL", "ECE", "Brier", "Gen Gap", "AULC", "LR Reductions",
@@ -183,7 +221,10 @@ def table_ablation(summary):
         return pd.DataFrame(columns=columns), {}
 
     exp_type = summary.get("experiment_type", pd.Series("", index=summary.index)).astype(str)
-    df = summary[summary["method"].isin(ABLATION_METHODS) & (exp_type == "ablation")].copy()
+    df = summary[
+        summary["method"].isin(ABLATION_METHODS)
+        & exp_type.isin(["ablation", "pd_component_ablation"])
+    ].copy()
     rows = []
     for (dataset, model, method), group in df.groupby(["dataset", "model", "method"], dropna=False):
         row = {
@@ -200,6 +241,8 @@ def table_ablation(summary):
 
 
 def table_sensitivity(summary):
+    """按 alpha/beta 设置生成超参数敏感性表。"""
+
     columns = [
         "Alpha", "Beta", "Seeds", "Test Acc", "Test NLL", "ECE", "Brier",
         "Gen Gap", "AULC", "Epochs Run",
@@ -235,6 +278,8 @@ def table_sensitivity(summary):
 
 
 def table_statistical_tests(summary):
+    """生成本方法相对最优基线的成对统计检验表。"""
+
     columns = [
         "Dataset", "Model", "Metric", "Ours", "Best Baseline", "Best Baseline Name",
         "Mean Difference", "Bootstrap 95% CI", "Cohen d", "N Pairs",
@@ -294,6 +339,8 @@ def table_statistical_tests(summary):
 
 
 def main():
+    """读取结果并将所有统计表写入指定目录。"""
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--results-dir", default="results")
     parser.add_argument("--out-dir", default="statistical_tables")

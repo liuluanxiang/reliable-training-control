@@ -1,0 +1,47 @@
+{
+  "experiment_name": "revision_main_cifar10_resnet50",
+  "experiment_type": "revision_main",
+  "dataset": "cifar10",
+  "model": "resnet50",
+  "methods": [
+    "step",
+    "cosine",
+    "plateau",
+    "reliability_val_loss_only",
+    "reliability"
+  ],
+  "seeds": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "epochs": 120,
+  "batch_size": 128,
+  "num_workers": 8,
+  "optimizer": "sgd",
+  "lr": 0.1,
+  "momentum": 0.9,
+  "weight_decay": 0.0005,
+  "val_ratio": 0.1,
+  "data_root": "./data",
+  "results_dir": "results_v2",
+  "device": "cuda",
+  "deterministic": false,
+  "controller": {
+    "alpha": 0.5,
+    "beta": 0.9,
+    "gamma": 0.5,
+    "min_lr": 1e-05,
+    "p_lr": 8,
+    "p_stop": 18,
+    "epsilon": 0.0001,
+    "delta": 0.05,
+    "prior_sigma": 0.05,
+    "lambda_g": 0.0001,
+    "lambda_u": 0.001
+  },
+  "budget_mode": "adaptive",
+  "data_protocol_version": "deterministic_validation_v2"
+}

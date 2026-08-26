@@ -1,3 +1,5 @@
+"""从逐 epoch 轨迹与摘要生成五组案例研究图。"""
+
 import argparse
 import json
 import sys
@@ -51,8 +53,12 @@ CASE1_SETTING_ORDER = [
 
 
 def collect_histories(results_dir):
+    """收集逐 epoch 历史，并排除 quick 验证运行。"""
+
     frames = []
-    for p in Path(results_dir).glob("*/*/seed_*/history.csv"):
+    for p in Path(results_dir).rglob("history.csv"):
+        if any(part in {"_archive", "smoke"} for part in p.parts):
+            continue
         df = pd.read_csv(p)
         if "experiment" not in df.columns:
             df["experiment"] = p.parts[-4]
@@ -67,11 +73,15 @@ def collect_histories(results_dir):
 
 
 def collect_summaries(results_dir):
+    """收集逐种子摘要，并排除 quick 验证运行。"""
+
     master = Path(results_dir) / "master_summary.csv"
     if master.exists():
         return pd.read_csv(master)
     rows = []
-    for p in Path(results_dir).glob("*/*/seed_*/summary.json"):
+    for p in Path(results_dir).rglob("summary.json"):
+        if any(part in {"_archive", "smoke"} for part in p.parts):
+            continue
         row = json.loads(p.read_text(encoding="utf-8"))
         row.setdefault("experiment", p.parts[-4])
         row.setdefault("method", p.parts[-3])
@@ -81,6 +91,8 @@ def collect_summaries(results_dir):
 
 
 def mean_ci(df, metric):
+    """按 epoch/method 计算指定指标的均值与 95% 区间。"""
+
     rows = []
     for (method, epoch), d in df.groupby(["method", "epoch"]):
         vals = d[metric].dropna().astype(float).values
@@ -93,6 +105,8 @@ def mean_ci(df, metric):
 
 
 def representative_experiment(df):
+    """选择同时具有最多方法和种子的代表性实验。"""
+
     if df.empty or "experiment" not in df.columns:
         return None
     meta_cols = [c for c in ["experiment", "model"] if c in df.columns]
@@ -107,6 +121,8 @@ def representative_experiment(df):
 
 
 def short_case1_setting_label(dataset, model):
+    """生成案例一面板使用的紧凑设置标签。"""
+
     labels = {
         ("cifar10", "resnet18"): "C10-R18",
         ("cifar10", "resnet50"): "C10-R50",
@@ -119,6 +135,8 @@ def short_case1_setting_label(dataset, model):
 
 
 def representative_case1_experiment(df):
+    """优先选择覆盖四种调度方法的案例一实验。"""
+
     required_cols = {EXPERIMENT_COL, METHOD_COL, PB_COL, GAP_COL}
     if df.empty or not required_cols.issubset(df.columns):
         return representative_experiment(df)
@@ -140,6 +158,8 @@ def representative_case1_experiment(df):
 
 
 def save_case1_figure(fig, out_dir, filename):
+    """用案例一专用边距保存图形。"""
+
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     png_path = out / filename
@@ -149,6 +169,8 @@ def save_case1_figure(fig, out_dir, filename):
 
 
 def _numeric_pair(df, x_col, y_col):
+    """提取两个指标都为有限值的数值对。"""
+
     d = df[[x_col, y_col]].copy()
     d[x_col] = pd.to_numeric(d[x_col], errors="coerce")
     d[y_col] = pd.to_numeric(d[y_col], errors="coerce")
@@ -156,6 +178,8 @@ def _numeric_pair(df, x_col, y_col):
 
 
 def _format_p_value(p_value):
+    """格式化相关性检验的 p 值。"""
+
     if not np.isfinite(p_value):
         return "p = n/a"
     if p_value < 1e-3:
@@ -164,6 +188,8 @@ def _format_p_value(p_value):
 
 
 def plot_mean_std_trajectory(ax, histories, metric_col, ylabel, title, methods):
+    """绘制多种子均值轨迹和标准差阴影。"""
+
     for method in methods:
         d = histories[histories[METHOD_COL].astype(str) == method].copy()
         if d.empty or metric_col not in d.columns:
@@ -194,6 +220,8 @@ def plot_mean_std_trajectory(ax, histories, metric_col, ylabel, title, methods):
 
 
 def plot_scatter_with_binned_median(ax, data, x_col, y_col, xlabel, ylabel, title):
+    """绘制信号散点、分箱中位数及秩相关统计。"""
+
     d = _numeric_pair(data, x_col, y_col) if {x_col, y_col}.issubset(data.columns) else pd.DataFrame()
     if d.empty:
         ax.text(0.5, 0.5, "data unavailable", ha="center", va="center", transform=ax.transAxes)
@@ -228,6 +256,8 @@ def plot_scatter_with_binned_median(ax, data, x_col, y_col, xlabel, ylabel, titl
 
 
 def case1_correlation_rows(histories):
+    """逐实验和方法计算案例一信号/泛化差相关性。"""
+
     rows = []
     required = {DATASET_COL, MODEL_COL, METHOD_COL, SEED_COL, PB_COL, GAP_COL}
     if histories.empty or not required.issubset(histories.columns):
@@ -248,6 +278,8 @@ def case1_correlation_rows(histories):
 
 
 def plot_grouped_correlation_summary(ax, corr_df):
+    """绘制跨设置分组相关系数及总体汇总。"""
+
     labels = [short_case1_setting_label(dataset, model) for dataset, model in CASE1_SETTING_ORDER]
     x = np.arange(len(labels))
     offsets = np.linspace(-0.24, 0.24, len(CASE1_METHODS))
@@ -296,6 +328,8 @@ def plot_grouped_correlation_summary(ax, corr_df):
 
 
 def fig_case1(hist, out_dir):
+    """生成可靠性信号随训练演化及相关性的案例图。"""
+
     exp = representative_case1_experiment(hist)
     df = hist[hist[EXPERIMENT_COL] == exp].copy() if exp else pd.DataFrame()
     rel = df[df[METHOD_COL] == "reliability"].copy() if not df.empty else pd.DataFrame()
@@ -323,6 +357,8 @@ def fig_case1(hist, out_dir):
 
 
 def fig_case2(hist, out_dir):
+    """生成风险信号与学习率动作的时间对齐案例图。"""
+
     exp = representative_experiment(hist)
     df = hist[(hist["method"] == "reliability") & (hist["experiment"] == exp)].copy() if exp else pd.DataFrame()
     fig, axes = plt.subplots(3, 2, figsize=(7.2, 7.8))
@@ -360,6 +396,8 @@ def fig_case2(hist, out_dir):
 
 
 def fig_case3(hist, summary, out_dir):
+    """生成最佳点、最终点与后期退化对比图。"""
+
     exp = representative_experiment(hist)
     df = hist[hist["experiment"] == exp].copy() if exp else hist.copy()
     sdf = summary.copy()
@@ -401,6 +439,8 @@ def fig_case3(hist, summary, out_dir):
 
 
 def fig_case4(summary, results_dir, out_dir):
+    """生成校准可靠性图和风险-覆盖率案例图。"""
+
     exp = representative_experiment(summary)
     sdf = summary.copy()
     fig, axes = plt.subplots(4, 2, figsize=(7.2, 10.0))
@@ -452,6 +492,8 @@ def fig_case4(summary, results_dir, out_dir):
 
 
 def fig_case5(summary, out_dir):
+    """生成跨数据集和模型的性能/稳定性汇总图。"""
+
     sdf = summary.copy()
     fig, axes = plt.subplots(3, 2, figsize=(7.2, 7.8))
 
@@ -483,6 +525,8 @@ def fig_case5(summary, out_dir):
 
 
 def main():
+    """收集正式实验结果并输出全部案例研究图。"""
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--results-dir", default="results")
     parser.add_argument("--out-dir", default="figures")

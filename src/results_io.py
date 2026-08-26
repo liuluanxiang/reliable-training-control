@@ -1,3 +1,5 @@
+"""统一读取实验结果，并处理历史结果的类型兼容。"""
+
 import json
 from pathlib import Path
 
@@ -5,6 +7,8 @@ import pandas as pd
 
 
 def infer_experiment_type(experiment_name):
+    """从历史实验名称推断类型；新结果应优先写入显式字段。"""
+
     name = str(experiment_name or "").lower()
     if name.startswith("quick"):
         return "quick"
@@ -20,6 +24,8 @@ def infer_experiment_type(experiment_name):
 
 
 def ensure_experiment_type(df):
+    """补齐 DataFrame 的 ``experiment_type``，不原地修改调用方数据。"""
+
     if df is None or df.empty:
         return df
     out = df.copy()
@@ -34,6 +40,8 @@ def ensure_experiment_type(df):
 
 
 def filter_quick(df, include_quick=False):
+    """默认排除仅用于通路验证、不可写入论文结论的 quick 结果。"""
+
     out = ensure_experiment_type(df)
     if out is None or out.empty or include_quick:
         return out
@@ -41,6 +49,8 @@ def filter_quick(df, include_quick=False):
 
 
 def collect_histories(results_dir, include_quick=False):
+    """递归汇总所有种子的逐 epoch 历史记录。"""
+
     frames = []
     for path in Path(results_dir).glob("*/*/seed_*/history.csv"):
         try:
@@ -62,6 +72,8 @@ def collect_histories(results_dir, include_quick=False):
 
 
 def collect_summaries(results_dir, include_quick=False):
+    """优先读取主汇总表，缺失时从各运行 ``summary.json`` 重建。"""
+
     results_dir = Path(results_dir)
     master = results_dir / "master_summary.csv"
     if master.exists():

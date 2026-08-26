@@ -1,3 +1,5 @@
+"""论文结果汇总、置信区间、多重检验与效应量工具。"""
+
 import numpy as np
 import warnings
 
@@ -8,11 +10,15 @@ except Exception:  # pragma: no cover - graceful fallback for minimal environmen
 
 
 def _clean(values):
+    """转换为一维浮点数组并移除 NaN/Inf。"""
+
     arr = np.asarray(values, dtype=float)
     return arr[np.isfinite(arr)]
 
 
 def mean_ci(values, ci=0.95):
+    """返回均值及双侧 t 置信区间；无 SciPy 时使用正态近似。"""
+
     vals = _clean(values)
     if len(vals) == 0:
         return np.nan, np.nan, np.nan
@@ -28,6 +34,8 @@ def mean_ci(values, ci=0.95):
 
 
 def mean_std(values):
+    """返回均值和样本标准差。"""
+
     vals = _clean(values)
     if len(vals) == 0:
         return np.nan, np.nan
@@ -37,6 +45,8 @@ def mean_std(values):
 
 
 def bootstrap_ci(values, n_boot=5000, ci=0.95, seed=123):
+    """以固定随机种子计算均值的百分位 bootstrap 区间。"""
+
     vals = _clean(values)
     if len(vals) == 0:
         return np.nan, np.nan
@@ -51,6 +61,8 @@ def bootstrap_ci(values, n_boot=5000, ci=0.95, seed=123):
 
 
 def holm_bonferroni(p_values):
+    """按 Holm-Bonferroni step-down 过程校正一组 p 值。"""
+
     pvals = np.asarray(p_values, dtype=float)
     adjusted = np.full(len(pvals), np.nan, dtype=float)
     valid = np.where(np.isfinite(pvals))[0]
@@ -67,6 +79,8 @@ def holm_bonferroni(p_values):
 
 
 def paired_ttest(a, b):
+    """对相同种子的成对结果执行双侧配对 t 检验。"""
+
     a = np.asarray(a, dtype=float)
     b = np.asarray(b, dtype=float)
     mask = np.isfinite(a) & np.isfinite(b)
@@ -81,6 +95,8 @@ def paired_ttest(a, b):
 
 
 def wilcoxon_test(a, b):
+    """对相同种子的成对结果执行 Wilcoxon signed-rank 检验。"""
+
     a = np.asarray(a, dtype=float)
     b = np.asarray(b, dtype=float)
     mask = np.isfinite(a) & np.isfinite(b)
@@ -95,6 +111,8 @@ def wilcoxon_test(a, b):
 
 
 def cohens_d(a, b):
+    """计算成对差值的 Cohen's dz。"""
+
     a = np.asarray(a, dtype=float)
     b = np.asarray(b, dtype=float)
     mask = np.isfinite(a) & np.isfinite(b)
@@ -108,6 +126,8 @@ def cohens_d(a, b):
 
 
 def format_p_value(p):
+    """生成人类可读的 p 值文本。"""
+
     if p is None or not np.isfinite(p):
         return "n/a"
     if p < 0.001:
@@ -116,6 +136,8 @@ def format_p_value(p):
 
 
 def p_stars(p):
+    """将 p 值映射为表格显著性星号。"""
+
     if p is None or not np.isfinite(p):
         return ""
     if p < 0.001:
@@ -128,6 +150,8 @@ def p_stars(p):
 
 
 def significance_marker(p):
+    """将 p 值映射为图表显著性标记。"""
+
     if p is None or not np.isfinite(p):
         return "n/a"
     if p < 0.001:
@@ -144,11 +168,13 @@ LOWER_BETTER = {
     "test_nll", "test_ece", "test_mce", "test_brier", "test_aurc", "test_eaurc",
     "final_gen_gap_loss", "late_degradation",
 }
-BASELINE_METHODS = ["step", "cosine", "plateau"]
+BASELINE_METHODS = ["step", "cosine", "plateau", "reliability_val_loss_only"]
 FULL_METHODS = ["reliability", "reliability_full"]
 
 
 def metric_higher_is_better(metric):
+    """返回指标优化方向，未知指标按越高越好处理。"""
+
     if metric in HIGHER_BETTER:
         return True
     if metric in LOWER_BETTER:
@@ -157,6 +183,12 @@ def metric_higher_is_better(metric):
 
 
 def compare_ours_vs_best_baseline(summary_df, metric, group_cols):
+    """逐实验组比较本方法与均值最优基线，并按共同种子配对统计。
+
+    基线选择使用组内重复种子的均值；显著性、置信区间和效应量只使用双方
+    都存在的种子，避免把非配对结果送入配对检验。
+    """
+
     import pandas as pd
 
     columns = list(group_cols) + [
@@ -231,6 +263,8 @@ def compare_ours_vs_best_baseline(summary_df, metric, group_cols):
 
 
 def spearman_with_p(a, b):
+    """返回 Spearman 相关系数及其双侧 p 值。"""
+
     a = np.asarray(a, dtype=float)
     b = np.asarray(b, dtype=float)
     mask = np.isfinite(a) & np.isfinite(b)
