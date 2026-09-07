@@ -27,8 +27,8 @@ from src.models import build_model
 from src.signals import SignalConfig, ReliabilitySignals
 from src.controller import ControllerConfig, ReliabilityController
 from src.metrics import (
-    AverageMeter, accuracy, topk_accuracy, expected_calibration_error,
-    maximum_calibration_error, brier_score, confidence_stats, reliability_bins,
+    expected_calibration_error, maximum_calibration_error, brier_score,
+    confidence_stats, reliability_bins,
     risk_coverage_curve, aurc_eaurc, area_under_curve, slope_last
 )
 from src.results_io import infer_experiment_type
@@ -447,7 +447,34 @@ def resolve_device(cfg):
     return device
 
 
-def train_one_epoch(model, loader, optimizer, criterion, device, signals, progress=None, context=""):
+def resolve_precision(cfg, device):
+    """Validate and return the configured numerical training precision."""
+
+    precision = str(cfg.get("precision", "fp32")).lower()
+    if precision not in {"fp32", "bf16"}:
+        raise ValueError(f"Unsupported precision={precision!r}; expected 'fp32' or 'bf16'.")
+    if precision == "bf16":
+        if device.type != "cuda":
+            raise RuntimeError("BF16 formal runs require a CUDA device.")
+        if not torch.cuda.is_bf16_supported():
+            raise RuntimeError(f"CUDA device {torch.cuda.get_device_name(device)} does not support BF16.")
+        torch.set_float32_matmul_precision("high")
+    return precision
+
+
+def autocast_context(device, precision):
+    """Create the per-forward autocast context without changing FP32 runs."""
+
+    return torch.autocast(
+        device_type=device.type,
+        dtype=torch.bfloat16 if precision == "bf16" else None,
+        enabled=precision == "bf16",
+    )
+
+
+def train_one_epoch(
+    model, loader, optimizer, criterion, device, signals, progress=None, context="", precision="fp32"
+):
     """训练一个 epoch，并采集 PB/PD 所需的梯度与参数更新范数。
 
     梯度范数在最后一个 mini-batch 的 ``optimizer.step`` 之前测量；更新范数
@@ -458,9 +485,10 @@ def train_one_epoch(model, loader, optimizer, criterion, device, signals, progre
     model.train()
     signals.begin_epoch(model)
 
-    loss_meter = AverageMeter()
-    acc_meter = AverageMeter()
-    top5_meter = AverageMeter()
+    loss_total = torch.zeros((), device=device, dtype=torch.float64)
+    top1_correct = torch.zeros((), device=device, dtype=torch.int64)
+    top5_correct = torch.zeros((), device=device, dtype=torch.int64)
+    sample_count = 0
     last_grad_norm = 0.0
     non_blocking = device.type == "cuda"
     total_batches = len(loader)
@@ -470,17 +498,22 @@ def train_one_epoch(model, loader, optimizer, criterion, device, signals, progre
     for batch_idx, (x, y) in enumerate(loader, start=1):
         x, y = x.to(device, non_blocking=non_blocking), y.to(device, non_blocking=non_blocking)
         optimizer.zero_grad(set_to_none=True)
-        logits = model(x)
-        loss = criterion(logits, y)
+        with autocast_context(device, precision):
+            logits = model(x)
+            loss = criterion(logits, y)
         loss.backward()
         # 只取 epoch 末批次梯度，控制额外计算成本并固定采样位置。
         if batch_idx == total_batches:
             last_grad_norm = signals.gradient_norm(model)
         optimizer.step()
 
-        loss_meter.update(loss.item(), x.size(0))
-        acc_meter.update(accuracy(logits.detach(), y), x.size(0))
-        top5_meter.update(topk_accuracy(logits.detach(), y, k=5), x.size(0))
+        batch_size = x.size(0)
+        detached_logits = logits.detach()
+        loss_total += loss.detach().double() * batch_size
+        top1_correct += detached_logits.argmax(dim=1).eq(y).sum()
+        k = min(5, detached_logits.size(1))
+        top5_correct += detached_logits.topk(k, dim=1).indices.eq(y.unsqueeze(1)).any(dim=1).sum()
+        sample_count += batch_size
 
         now = time.time()
         should_log = (
@@ -505,28 +538,32 @@ def train_one_epoch(model, loader, optimizer, criterion, device, signals, progre
                 total_batches=total_batches,
                 batch_elapsed=format_duration(elapsed),
                 eta_epoch=format_duration(eta_epoch),
-                train_loss=loss_meter.avg,
-                train_acc=acc_meter.avg,
+                train_loss=float((loss_total / sample_count).item()),
+                train_acc=float((top1_correct.float() / sample_count).item()),
             )
             progress.log(
                 f"{context} | train batch={batch_idx}/{total_batches} | "
                 f"elapsed={format_duration(elapsed)} | eta_epoch={format_duration(eta_epoch)} | "
-                f"loss={loss_meter.avg:.4f} | acc={acc_meter.avg:.4f}"
+                f"loss={float((loss_total / sample_count).item()):.4f} | "
+                f"acc={float((top1_correct.float() / sample_count).item()):.4f}"
             )
             last_log = now
 
     update_norm = signals.update_norm(model)
     return {
-        "train_nll": loss_meter.avg,
-        "train_acc": acc_meter.avg,
-        "train_top5_acc": top5_meter.avg,
+        "train_nll": float((loss_total / sample_count).item()),
+        "train_acc": float((top1_correct.float() / sample_count).item()),
+        "train_top5_acc": float((top5_correct.float() / sample_count).item()),
         "grad_norm": last_grad_norm,
         "update_norm": update_norm,
     }
 
 
 @torch.no_grad()
-def evaluate(model, loader, criterion, device, return_logits=False, progress=None, context="eval"):
+def evaluate(
+    model, loader, criterion, device, return_logits=False, progress=None, context="eval",
+    precision="fp32", compute_diagnostics=True,
+):
     """在无梯度模式下计算分类、校准和选择性预测指标。
 
     logits 和 targets 始终先汇总到 CPU，以便所有派生指标使用完全相同的样本
@@ -534,9 +571,10 @@ def evaluate(model, loader, criterion, device, return_logits=False, progress=Non
     """
 
     model.eval()
-    loss_meter = AverageMeter()
-    acc_meter = AverageMeter()
-    top5_meter = AverageMeter()
+    loss_total = torch.zeros((), device=device, dtype=torch.float64)
+    top1_correct = torch.zeros((), device=device, dtype=torch.int64)
+    top5_correct = torch.zeros((), device=device, dtype=torch.int64)
+    sample_count = 0
     all_logits = []
     all_targets = []
     non_blocking = device.type == "cuda"
@@ -546,15 +584,20 @@ def evaluate(model, loader, criterion, device, return_logits=False, progress=Non
 
     for batch_idx, (x, y) in enumerate(loader, start=1):
         x, y = x.to(device, non_blocking=non_blocking), y.to(device, non_blocking=non_blocking)
-        logits = model(x)
-        loss = criterion(logits, y)
+        with autocast_context(device, precision):
+            logits = model(x)
+            loss = criterion(logits, y)
 
-        loss_meter.update(loss.item(), x.size(0))
-        acc_meter.update(accuracy(logits, y), x.size(0))
-        top5_meter.update(topk_accuracy(logits, y, k=5), x.size(0))
+        batch_size = x.size(0)
+        loss_total += loss.detach().double() * batch_size
+        top1_correct += logits.argmax(dim=1).eq(y).sum()
+        k = min(5, logits.size(1))
+        top5_correct += logits.topk(k, dim=1).indices.eq(y.unsqueeze(1)).any(dim=1).sum()
+        sample_count += batch_size
 
-        all_logits.append(logits.detach().cpu())
-        all_targets.append(y.detach().cpu())
+        if compute_diagnostics or return_logits:
+            all_logits.append(logits.detach().float().cpu())
+            all_targets.append(y.detach().cpu())
 
         now = time.time()
         should_log = (
@@ -579,30 +622,39 @@ def evaluate(model, loader, criterion, device, return_logits=False, progress=Non
                 total_batches=total_batches,
                 batch_elapsed=format_duration(elapsed),
                 eta_eval=format_duration(eta_eval),
-                eval_nll=loss_meter.avg,
-                eval_acc=acc_meter.avg,
+                eval_nll=float((loss_total / sample_count).item()),
+                eval_acc=float((top1_correct.float() / sample_count).item()),
             )
             progress.log(
                 f"{context} | eval batch={batch_idx}/{total_batches} | "
                 f"elapsed={format_duration(elapsed)} | eta_eval={format_duration(eta_eval)} | "
-                f"nll={loss_meter.avg:.4f} | acc={acc_meter.avg:.4f}"
+                f"nll={float((loss_total / sample_count).item()):.4f} | "
+                f"acc={float((top1_correct.float() / sample_count).item()):.4f}"
             )
             last_log = now
 
     # 先拼接全数据集预测，再计算 ECE/AURC，避免按 batch 平均造成统计偏差。
-    logits = torch.cat(all_logits, dim=0)
-    targets = torch.cat(all_targets, dim=0)
-
-    ece = expected_calibration_error(logits, targets)
-    mce = maximum_calibration_error(logits, targets)
-    brier = brier_score(logits, targets)
-    aurc, eaurc = aurc_eaurc(logits, targets)
-    cstats = confidence_stats(logits)
+    if compute_diagnostics or return_logits:
+        logits = torch.cat(all_logits, dim=0)
+        targets = torch.cat(all_targets, dim=0)
+        ece = expected_calibration_error(logits, targets)
+        mce = maximum_calibration_error(logits, targets)
+        brier = brier_score(logits, targets)
+        aurc, eaurc = aurc_eaurc(logits, targets)
+        cstats = confidence_stats(logits)
+    else:
+        logits = targets = None
+        ece = mce = brier = aurc = eaurc = float("nan")
+        cstats = {
+            "confidence_mean": float("nan"),
+            "entropy_mean": float("nan"),
+            "margin_mean": float("nan"),
+        }
 
     out = {
-        "nll": loss_meter.avg,
-        "acc": acc_meter.avg,
-        "top5_acc": top5_meter.avg,
+        "nll": float((loss_total / sample_count).item()),
+        "acc": float((top1_correct.float() / sample_count).item()),
+        "top5_acc": float((top5_correct.float() / sample_count).item()),
         "ece": ece,
         "mce": mce,
         "brier": brier,
@@ -723,6 +775,8 @@ def run_one(cfg, method, seed, progress, run_index=1, total_runs=1, existing_pol
     (out_dir / "config_used.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
     set_seed(seed, deterministic=bool(cfg.get("deterministic", False)))
     device = resolve_device(cfg)
+    precision = resolve_precision(cfg, device)
+    validation_diagnostics = bool(cfg.get("validation_diagnostics", True))
 
     train_loader, val_loader, test_loader, num_classes = build_loaders(
         cfg["dataset"],
@@ -740,6 +794,11 @@ def run_one(cfg, method, seed, progress, run_index=1, total_runs=1, existing_pol
         f"seed={seed} | epochs={int(cfg['epochs'])} | train_batches={len(train_loader)} | "
         f"val_batches={len(val_loader)} | test_batches={len(test_loader)}"
     )
+    progress.log(
+        f"Data loading: requested_num_workers={int(cfg['num_workers'])} | "
+        f"effective_num_workers={train_loader.num_workers} | "
+        f"persistent_workers={train_loader.persistent_workers}"
+    )
     progress.update_current(
         phase="training",
         train_batches=len(train_loader),
@@ -748,12 +807,18 @@ def run_one(cfg, method, seed, progress, run_index=1, total_runs=1, existing_pol
         total_batches=len(train_loader),
     )
     progress.log(f"Using device: {device}")
+    progress.log(
+        f"Numerical protocol: precision={precision} | "
+        f"validation_diagnostics={validation_diagnostics}"
+    )
     if device.type == "cuda":
         progress.log(f"CUDA device: {torch.cuda.get_device_name(device)}")
 
     # 模型在固定随机种子后建立；初始化、数据划分和外部权重都记录哈希。
     model = build_model(
-        cfg["model"], num_classes, pretrained_checkpoint=cfg.get("pretrained_checkpoint")
+        cfg["model"], num_classes,
+        pretrained_checkpoint=cfg.get("pretrained_checkpoint"),
+        image_size=cfg.get("image_size"),
     ).to(device)
     pretrained_checkpoint_hash = file_sha256(cfg.get("pretrained_checkpoint"))
     initialization_hash = tensor_state_hash(model.state_dict())
@@ -765,6 +830,8 @@ def run_one(cfg, method, seed, progress, run_index=1, total_runs=1, existing_pol
         "method": method,
         "seed": seed,
         "budget_mode": cfg.get("budget_mode", "adaptive"),
+        "precision": precision,
+        "validation_diagnostics": validation_diagnostics,
         "data_protocol_version": cfg.get("data_protocol_version", "legacy_augmented_validation_v1"),
         "variant": method,
         "config_hash": config_hash,
@@ -775,6 +842,9 @@ def run_one(cfg, method, seed, progress, run_index=1, total_runs=1, existing_pol
         "initialization_hash": initialization_hash,
         "data_order_seed": seed,
         "augmentation_seed": seed,
+        "requested_num_workers": int(cfg["num_workers"]),
+        "effective_num_workers": int(train_loader.num_workers),
+        "persistent_workers": bool(train_loader.persistent_workers),
         "git_commit": commit,
         "test_evaluation_count": 0,
         "test_evaluation_timestamp": "",
@@ -796,6 +866,7 @@ def run_one(cfg, method, seed, progress, run_index=1, total_runs=1, existing_pol
         prior_sigma=cfg["controller"]["prior_sigma"],
         lambda_g=cfg["controller"]["lambda_g"],
         lambda_u=cfg["controller"]["lambda_u"],
+        snapshot_device=cfg.get("signal_snapshot_device", "model"),
     )
     signals = ReliabilitySignals(model, len(train_loader.dataset), sig_cfg)
 
@@ -839,7 +910,7 @@ def run_one(cfg, method, seed, progress, run_index=1, total_runs=1, existing_pol
         )
         train_stats = train_one_epoch(
             model, train_loader, optimizer, criterion, device, signals,
-            progress=progress, context=epoch_context
+            progress=progress, context=epoch_context, precision=precision
         )
         progress.update_current(
             phase="evaluating",
@@ -848,7 +919,8 @@ def run_one(cfg, method, seed, progress, run_index=1, total_runs=1, existing_pol
         )
         val_stats = evaluate(
             model, val_loader, criterion, device, return_logits=False,
-            progress=progress, context=epoch_context
+            progress=progress, context=epoch_context, precision=precision,
+            compute_diagnostics=validation_diagnostics,
         )
 
         sync_if_cuda(device)
@@ -1001,6 +1073,8 @@ def run_one(cfg, method, seed, progress, run_index=1, total_runs=1, existing_pol
         model, test_loader, criterion, device, return_logits=True,
         progress=progress,
         context=f"[run {run_index}/{total_runs}] {exp_name} | {method} | seed={seed} | test",
+        precision=precision,
+        compute_diagnostics=True,
     )
     logits = test_stats.pop("logits")
     targets = test_stats.pop("targets")
@@ -1070,6 +1144,11 @@ def run_one(cfg, method, seed, progress, run_index=1, total_runs=1, existing_pol
         "initialization_hash": initialization_hash,
         "git_commit": commit,
         "budget_mode": cfg.get("budget_mode", "adaptive"),
+        "precision": precision,
+        "validation_diagnostics": validation_diagnostics,
+        "requested_num_workers": int(cfg["num_workers"]),
+        "effective_num_workers": int(train_loader.num_workers),
+        "persistent_workers": bool(train_loader.persistent_workers),
         "data_protocol_version": cfg.get("data_protocol_version", "legacy_augmented_validation_v1"),
         "final_lr": float(hist_df["lr_after"].iloc[-1]),
         "stopping_epoch": int(hist_df["epoch"].iloc[-1]),

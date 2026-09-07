@@ -16,6 +16,7 @@ class SignalConfig:
     prior_sigma: float = 0.05
     lambda_g: float = 1e-4
     lambda_u: float = 1e-3
+    snapshot_device: str = "model"
 
 
 class RunningZ:
@@ -60,12 +61,11 @@ class ReliabilitySignals:
 
         self.cfg = cfg
         self.n_train = int(n_train)
+        if cfg.snapshot_device not in {"model", "cpu"}:
+            raise ValueError("Signal snapshot_device must be 'model' or 'cpu'.")
+        self.snapshot_device = cfg.snapshot_device
         # 固定先验中心 theta_0：整个 run 内不再更新。
-        self.theta0 = {
-            name: p.detach().clone()
-            for name, p in model.named_parameters()
-            if p.requires_grad
-        }
+        self.theta0 = self._snapshot(model)
         self.prev_state = None
         self.z_pb = RunningZ()
         self.z_pd = RunningZ()
@@ -73,6 +73,24 @@ class ReliabilitySignals:
         self.rbar = None
         self.gradient_norm_seconds = 0.0
         self.update_norm_seconds = 0.0
+
+    def _snapshot(self, model):
+        """复制可训练参数；大模型可把快照放在 CPU 以降低常驻显存。"""
+
+        return {
+            name: p.detach().to("cpu", copy=True) if self.snapshot_device == "cpu" else p.detach().clone()
+            for name, p in model.named_parameters()
+            if p.requires_grad
+        }
+
+    @staticmethod
+    def _squared_distance(parameter, reference):
+        """在参考快照所在设备计算单个参数张量的平方距离。"""
+
+        current = parameter.detach()
+        if current.device != reference.device:
+            current = current.to(reference.device)
+        return torch.sum((current - reference) ** 2)
 
     @staticmethod
     def _sync_model(model):
@@ -88,11 +106,7 @@ class ReliabilitySignals:
 
         self.gradient_norm_seconds = 0.0
         self.update_norm_seconds = 0.0
-        self.prev_state = {
-            name: p.detach().clone()
-            for name, p in model.named_parameters()
-            if p.requires_grad
-        }
+        self.prev_state = self._snapshot(model)
 
     @torch.no_grad()
     def gradient_norm(self, model):
@@ -121,8 +135,7 @@ class ReliabilitySignals:
         for name, p in model.named_parameters():
             if not p.requires_grad:
                 continue
-            diff = p.detach() - self.prev_state[name]
-            terms.append(torch.sum(diff ** 2))
+            terms.append(self._squared_distance(p, self.prev_state[name]))
         value = torch.stack(terms).sum().sqrt().item() if terms else 0.0
         self._sync_model(model)
         self.update_norm_seconds += time.perf_counter() - started
@@ -138,8 +151,7 @@ class ReliabilitySignals:
         for name, p in model.named_parameters():
             if not p.requires_grad:
                 continue
-            diff = p.detach() - self.theta0[name]
-            terms.append(torch.sum(diff ** 2))
+            terms.append(self._squared_distance(p, self.theta0[name]))
         total = torch.stack(terms).sum().item() if terms else 0.0
         self._sync_model(model)
         return total / (2.0 * sigma2)
